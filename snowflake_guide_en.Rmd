@@ -1,0 +1,1199 @@
+---
+title: "Snowflake for Beginners and Data Analytics"
+pagetitle: "Snowflake for Beginners and Data Analytics | The V Lab"
+subtitle: "A practical, end-to-end guide from first warehouse to analytical workflows"
+author: "The V Lab · Learning Guide"
+date: "Updated August 11, 2026"
+lang: en
+toc-title: "Contents"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+    anchor_sections: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    code_download: false
+    df_print: paged
+    fig_caption: true
+    keep_md: false
+    css: snowflake_styles.css
+    includes:
+      before_body: includes/vlab-brand.html
+always_allow_html: true
+---
+
+<nav class="language-switch" aria-label="Course navigation">
+  <span class="language-home">The V Lab · Snowflake Learning Module</span>
+  <a class="language-option" href="snowflake_guide_zh.html" lang="zh-CN">中文版</a>
+  <span class="language-option active" aria-current="page">English</span>
+</nav>
+
+<div class="module-bar">
+  <div class="module-stat"><strong>Audience</strong><span>Data analysts, data engineers, and technical managers</span></div>
+  <div class="module-stat"><strong>Study time</strong><span>About 120–180 minutes, including SQL practice</span></div>
+  <div class="module-stat"><strong>Prerequisites</strong><span>Basic SQL; an optional Snowflake learning account</span></div>
+</div>
+
+# How to use this guide
+
+Snowflake is a managed data platform built for storing, transforming, analyzing, and securely sharing data. This guide teaches the mental model first, then turns that model into hands-on SQL. It is written for analysts, data engineers, students, and technically curious business users who know basic spreadsheet concepts or a little SQL.
+
+By the end, you should be able to:
+
+- explain Snowflake's storage, compute, and cloud-services layers;
+- navigate the account, database, schema, and object hierarchy;
+- create and operate a virtual warehouse without leaving it running unnecessarily;
+- load a small dataset and perform exploratory, aggregate, time-series, and window analyses;
+- query JSON and other semi-structured data with `VARIANT` and `FLATTEN`;
+- understand Time Travel, cloning, secure sharing, and common analytics integrations;
+- apply baseline security, cost, and performance practices; and
+- design a small, repeatable analytics project.
+
+All SQL examples are intended for a SQL file in **Snowsight Workspaces**, Snowflake's current SQL editing experience. Commands that create account-level objects require an appropriately privileged role. Never run administrative examples in a production account without reviewing names, privileges, retention, and cost settings with your Snowflake administrator.
+
+<div class="warning">
+<strong>Cost note.</strong> Snowflake charges can include compute, storage, serverless features, cloud services, and data transfer. A suspended virtual warehouse does not consume warehouse credits, but storage and some non-warehouse services can still incur cost. Use a trial or approved learning account, start small, and enable cost controls.
+</div>
+
+# Part I — Snowflake fundamentals
+
+## What Snowflake is
+
+At its core, Snowflake is an analytical database delivered as a managed cloud service. You work with familiar tables, views, and SQL, but Snowflake operates much of the infrastructure: data storage layout, software upgrades, availability, and compute provisioning. It is designed primarily for analytical workloads such as business intelligence, reporting, transformation, data science, and governed data sharing.
+
+Snowflake is not simply a conventional database server moved into the cloud. A conventional system often couples stored data to a fixed server. Snowflake separates persistent data from the compute clusters that query it. Multiple compute clusters can read the same governed data without each team maintaining a separate database copy.
+
+Typical uses include:
+
+- consolidating data from applications, files, event streams, and external platforms;
+- building a warehouse or lakehouse-style analytical foundation;
+- creating curated data marts for finance, marketing, operations, or product teams;
+- running interactive SQL, dashboards, scheduled transformations, and feature engineering;
+- sharing governed data without exporting files; and
+- enabling Python, Java, and other workloads through Snowpark and related services.
+
+Snowflake is usually not the first choice for millisecond, row-by-row transactional processing such as the primary database behind an online checkout. A common architecture keeps operational transactions in an OLTP system and copies or streams the relevant data into Snowflake for analytics.
+
+## The three-layer architecture
+
+<div class="architecture">
+  <div><strong>Database storage</strong><br/>Durable, compressed, columnar data organized automatically into micro-partitions.</div>
+  <div><strong>Query processing</strong><br/>Independent virtual warehouses supply CPU, memory, and temporary storage for SQL and data work.</div>
+  <div><strong>Cloud services</strong><br/>Authentication, metadata, optimization, transactions, access control, and coordination.</div>
+</div>
+
+### Database storage
+
+When data is loaded into native Snowflake tables, Snowflake reorganizes it into its internal compressed columnar format. The physical storage is managed for you. Snowflake records metadata about **micro-partitions**—small, immutable storage units—such as value ranges for columns. The optimizer can use this metadata to avoid reading partitions that cannot match a filter, a behavior called **partition pruning**.
+
+You do not normally create indexes or manually assign files to disks. Good table design and selective filters still matter, but physical administration is different from a traditional database.
+
+### Query processing with virtual warehouses
+
+A **virtual warehouse** is a named compute cluster. It runs queries, loads and unloads data, and performs transformations. Warehouses come in sizes; moving up a size provides more compute and generally consumes credits at a higher rate while running.
+
+Important consequences:
+
+- The same stored table can be queried by different warehouses.
+- An ELT warehouse and a dashboard warehouse can scale independently.
+- Suspending a warehouse stops its warehouse-compute consumption; it does not delete data.
+- Resizing changes compute capacity, not the amount of stored data.
+- A multi-cluster warehouse addresses concurrency by adding clusters; making one cluster larger is mainly a way to give individual queries more resources.
+
+### Cloud services
+
+The cloud-services layer coordinates the system. It handles login and session management, authorization, metadata, query parsing and optimization, and infrastructure orchestration. Most of the time it is invisible, but it explains why metadata commands and security decisions are not the job of a virtual warehouse alone.
+
+## Why separating storage and compute matters
+
+| Requirement | How separation helps | Design implication |
+|---|---|---|
+| Different workloads | Give loading, ad hoc analysis, and BI separate warehouses | One workload is less likely to queue behind another |
+| Elastic performance | Resize or scale compute without copying data | Test with representative queries before choosing a size |
+| Cost control | Suspend idle warehouses while keeping data available | Configure auto-suspend and auto-resume deliberately |
+| Team isolation | Grant each role access to an appropriate warehouse | Warehouse privileges and data privileges are separate |
+| Shared truth | Several compute clusters query the same governed tables | Avoid unnecessary departmental copies |
+
+> **Mental model:** storage answers “where does the durable data live?”, a warehouse answers “what compute will do this work?”, and a role answers “what is this session allowed to do?” A query usually needs all three contexts.
+
+## Object hierarchy and session context
+
+The central data hierarchy is:
+
+```text
+Organization
+└── Account
+    ├── Database
+    │   └── Schema
+    │       ├── Table / Dynamic Table / Iceberg Table
+    │       ├── View / Materialized View
+    │       ├── Stage / File Format / Pipe
+    │       ├── Stream / Task
+    │       └── Function / Procedure / Sequence
+    ├── Virtual Warehouse
+    ├── Role
+    ├── User
+    ├── Share
+    └── Integration / Policy / Resource Monitor
+```
+
+A table has a three-part fully qualified name:
+
+```sql
+DATABASE_NAME.SCHEMA_NAME.TABLE_NAME
+```
+
+If the database and schema are already selected for the session, `TABLE_NAME` is enough. Fully qualified names are safer in scripts because they reduce ambiguity.
+
+Your SQL execution context also has a current role, warehouse, database, and schema. Inspect them before running unfamiliar SQL:
+
+```sql
+SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE(),
+       CURRENT_DATABASE(), CURRENT_SCHEMA();
+```
+
+Change the context explicitly:
+
+```sql
+USE ROLE SYSADMIN;
+USE WAREHOUSE ANALYTICS_WH;
+USE DATABASE ANALYTICS_LAB;
+USE SCHEMA MART;
+```
+
+Unquoted identifiers are stored and resolved in uppercase. Quoted identifiers are case-sensitive and preserve their exact characters. Beginners are usually better served by simple unquoted names such as `ORDER_ID` rather than names that require double quotes.
+
+## Core objects an analyst should recognize
+
+| Object | Purpose | Beginner example |
+|---|---|---|
+| Database | Top-level container for data objects | `ANALYTICS_LAB` |
+| Schema | Namespace and security boundary within a database | `RAW`, `STAGE`, `MART` |
+| Table | Persistent rows and columns | `MART.ORDERS` |
+| View | Stored query evaluated when referenced | `MART.DAILY_SALES` |
+| Stage | Location abstraction for loading/unloading files | Internal upload stage or cloud object storage |
+| File format | Reusable rules for parsing files | CSV delimiter, JSON type, compression |
+| Warehouse | Compute used to execute work | `ANALYTICS_WH` |
+| Role | Collection of privileges | `ANALYST_ROLE` |
+| Stream | Change-tracking offset over a table or view | Incremental processing |
+| Task | Scheduled or triggered SQL work | Refresh a daily aggregate |
+| Dynamic table | Declaratively refreshed query result | Maintain a transformation pipeline |
+| Share | Governed cross-account data access | Publish selected secure views |
+
+# Part II — Set up a safe learning environment
+
+## Use Snowsight and create a Workspace SQL file
+
+**Snowsight** is Snowflake's web interface. **Workspaces** is its file-based development environment for SQL, notebooks, models, and pipeline code, with an editor, database explorer, results, and query history. Legacy Worksheets and Dashboards were removed on June 22, 2026; use Workspaces for new SQL work. Feature rollout and related capabilities can still vary by account, region, and administrator configuration. After signing in:
+
+1. Open **Projects → Workspaces**, choose a workspace, and create a SQL file.
+2. Confirm the execution context, including the active role and warehouse.
+3. Paste only one section of this guide at a time.
+4. Select a statement and run it; then inspect both results and query details.
+5. Keep destructive statements such as `DROP` out of shared production files.
+
+Names and navigation can evolve, but the session concepts remain the same.
+
+## Create the lab database and warehouse
+
+The following setup is convenient for a personal trial. In an organization, ask an administrator to provision equivalent resources and a least-privilege role.
+
+```sql
+-- Run with a role allowed to create warehouses and databases.
+USE ROLE SYSADMIN;
+
+CREATE WAREHOUSE IF NOT EXISTS ANALYTICS_WH
+  WAREHOUSE_SIZE = 'XSMALL'
+  AUTO_SUSPEND = 60
+  AUTO_RESUME = TRUE
+  INITIALLY_SUSPENDED = TRUE
+  COMMENT = 'Beginner analytics learning warehouse';
+
+CREATE DATABASE IF NOT EXISTS ANALYTICS_LAB
+  COMMENT = 'Hands-on Snowflake analytics guide';
+
+CREATE SCHEMA IF NOT EXISTS ANALYTICS_LAB.RAW
+  COMMENT = 'Source-shaped data';
+
+CREATE SCHEMA IF NOT EXISTS ANALYTICS_LAB.MART
+  COMMENT = 'Analytics-ready data products';
+
+USE WAREHOUSE ANALYTICS_WH;
+USE DATABASE ANALYTICS_LAB;
+USE SCHEMA MART;
+```
+
+`XSMALL` is a sensible starting point, not a universal answer. `AUTO_SUSPEND = 60` asks Snowflake to suspend after 60 seconds without activity, and `AUTO_RESUME = TRUE` lets an authorized query start it again. Repeatedly suspending and resuming can discard a warm warehouse cache and each start is subject to the applicable minimum billing interval, so tune the interval to the workload rather than copying it blindly.
+
+Check the environment:
+
+```sql
+SHOW WAREHOUSES LIKE 'ANALYTICS_WH';
+SHOW DATABASES LIKE 'ANALYTICS_LAB';
+SHOW SCHEMAS IN DATABASE ANALYTICS_LAB;
+```
+
+## Create a small retail dataset
+
+This self-contained dataset supports the examples in the rest of the guide.
+
+```sql
+CREATE OR REPLACE TABLE ANALYTICS_LAB.MART.CUSTOMERS (
+  CUSTOMER_ID   NUMBER,
+  CUSTOMER_NAME VARCHAR,
+  REGION        VARCHAR,
+  SIGNUP_DATE   DATE,
+  SEGMENT       VARCHAR
+);
+
+INSERT INTO ANALYTICS_LAB.MART.CUSTOMERS
+  (CUSTOMER_ID, CUSTOMER_NAME, REGION, SIGNUP_DATE, SEGMENT)
+VALUES
+  (101, 'Avery Chen',   'West',    '2025-01-05', 'Consumer'),
+  (102, 'Jordan Smith', 'Central', '2025-01-16', 'Small Business'),
+  (103, 'Sam Rivera',   'East',    '2025-02-02', 'Consumer'),
+  (104, 'Morgan Lee',   'West',    '2025-02-18', 'Enterprise'),
+  (105, 'Taylor Brown', NULL,      '2025-03-01', 'Consumer');
+
+CREATE OR REPLACE TABLE ANALYTICS_LAB.MART.ORDERS (
+  ORDER_ID      NUMBER,
+  CUSTOMER_ID   NUMBER,
+  ORDER_TS      TIMESTAMP_NTZ,
+  PRODUCT       VARCHAR,
+  CATEGORY      VARCHAR,
+  QUANTITY      NUMBER,
+  UNIT_PRICE    NUMBER(10,2),
+  DISCOUNT_PCT  NUMBER(5,2),
+  STATUS        VARCHAR
+);
+
+INSERT INTO ANALYTICS_LAB.MART.ORDERS
+  (ORDER_ID, CUSTOMER_ID, ORDER_TS, PRODUCT, CATEGORY,
+   QUANTITY, UNIT_PRICE, DISCOUNT_PCT, STATUS)
+VALUES
+  (1001, 101, '2025-03-01 09:15:00', 'Keyboard', 'Accessories', 2,  75.00,  0, 'SHIPPED'),
+  (1002, 102, '2025-03-01 11:30:00', 'Monitor',  'Displays',    1, 320.00, 10, 'SHIPPED'),
+  (1003, 101, '2025-03-03 14:05:00', 'Mouse',    'Accessories', 1,  40.00,  0, 'RETURNED'),
+  (1004, 103, '2025-03-04 10:00:00', 'Laptop',   'Computers',   1, 980.00,  5, 'SHIPPED'),
+  (1005, 104, '2025-03-07 16:40:00', 'Dock',     'Accessories', 3, 145.00, 15, 'PROCESSING'),
+  (1006, 102, '2025-03-09 08:20:00', 'Laptop',   'Computers',   2, 920.00,  0, 'SHIPPED'),
+  (1007, 103, '2025-03-10 13:10:00', 'Monitor',  'Displays',    2, 300.00,  5, 'CANCELLED'),
+  (1008, 104, '2025-03-11 15:55:00', 'Keyboard', 'Accessories', 5,  70.00, 10, 'SHIPPED');
+```
+
+Validate before analyzing:
+
+```sql
+SELECT COUNT(*) AS CUSTOMER_ROWS FROM CUSTOMERS;
+SELECT COUNT(*) AS ORDER_ROWS FROM ORDERS;
+
+SELECT *
+FROM ORDERS
+ORDER BY ORDER_TS;
+```
+
+<div class="check">
+<strong>Checkpoint.</strong> You should have 5 customer rows and 8 order rows. If an unqualified name fails, run <code>USE DATABASE ANALYTICS_LAB; USE SCHEMA MART;</code> or use the fully qualified table name.
+</div>
+
+## Optional: create a dedicated analyst role
+
+Production access should not depend on everyone using `SYSADMIN`. The following pattern separates identity, role, data privileges, and warehouse privileges. An administrator should adapt it to your organization's role hierarchy.
+
+```sql
+USE ROLE SECURITYADMIN;
+CREATE ROLE IF NOT EXISTS ANALYST_ROLE;
+
+-- Place the custom role in the normal role hierarchy.
+GRANT ROLE ANALYST_ROLE TO ROLE SYSADMIN;
+-- Replace YOUR_USER with an actual user identifier.
+GRANT ROLE ANALYST_ROLE TO USER YOUR_USER;
+
+USE ROLE SYSADMIN;
+GRANT USAGE ON WAREHOUSE ANALYTICS_WH TO ROLE ANALYST_ROLE;
+GRANT USAGE ON DATABASE ANALYTICS_LAB TO ROLE ANALYST_ROLE;
+GRANT USAGE ON SCHEMA ANALYTICS_LAB.MART TO ROLE ANALYST_ROLE;
+GRANT SELECT ON ALL TABLES IN SCHEMA ANALYTICS_LAB.MART TO ROLE ANALYST_ROLE;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA ANALYTICS_LAB.MART TO ROLE ANALYST_ROLE;
+```
+
+Notice that `USAGE` on the warehouse does not grant access to a table, and `SELECT` on a table does not grant compute. Both sides are necessary.
+
+<div class="exercise">
+<strong>Hands-on exercise 1 — Context and objects</strong>
+
+1. Run the context inspection query and record all five values.
+2. Describe the `ORDERS` table with `DESC TABLE ORDERS;`.
+3. List its columns from `ANALYTICS_LAB.INFORMATION_SCHEMA.COLUMNS`.
+4. Suspend `ANALYTICS_WH`, then run a `SELECT` and observe auto-resume.
+5. Explain in one sentence why the table remains available while the warehouse is suspended.
+</div>
+
+# Part III — What Snowflake can do for data analytics
+
+## A repeatable analytical workflow
+
+A disciplined analysis usually follows this loop:
+
+1. **Frame the question.** Define metric, population, grain, time range, and acceptable freshness.
+2. **Locate and understand data.** Check ownership, lineage, types, time zones, and meaning.
+3. **Profile quality.** Find missing values, duplicates, impossible values, and unexpected categories.
+4. **Transform at the right grain.** Join carefully and make business rules explicit.
+5. **Analyze and validate.** Reconcile totals and compare against a known source.
+6. **Publish a governed result.** Use a view or table with documentation and ownership.
+7. **Monitor.** Track freshness, query behavior, access, and cost.
+
+Snowflake supports each step with SQL, metadata, governance, programmable interfaces, and integrations.
+
+## Exploratory data analysis and data quality
+
+Start with shape, range, distinctness, and missingness rather than immediately building a chart.
+
+```sql
+SELECT
+  COUNT(*)                                      AS ROW_COUNT,
+  COUNT(DISTINCT ORDER_ID)                      AS DISTINCT_ORDER_IDS,
+  MIN(ORDER_TS)                                 AS FIRST_ORDER_TS,
+  MAX(ORDER_TS)                                 AS LAST_ORDER_TS,
+  COUNT_IF(CUSTOMER_ID IS NULL)                 AS MISSING_CUSTOMERS,
+  COUNT_IF(QUANTITY <= 0)                       AS NONPOSITIVE_QUANTITY,
+  APPROX_COUNT_DISTINCT(PRODUCT)                AS APPROX_PRODUCTS
+FROM ORDERS;
+```
+
+Inspect categorical distributions:
+
+```sql
+SELECT STATUS, COUNT(*) AS ORDERS
+FROM ORDERS
+GROUP BY STATUS
+ORDER BY ORDERS DESC;
+```
+
+Detect duplicate business keys:
+
+```sql
+SELECT ORDER_ID, COUNT(*) AS COPIES
+FROM ORDERS
+GROUP BY ORDER_ID
+HAVING COUNT(*) > 1;
+```
+
+Summarize numerical values:
+
+```sql
+SELECT
+  MIN(UNIT_PRICE)                AS MIN_PRICE,
+  AVG(UNIT_PRICE)                AS AVG_PRICE,
+  MEDIAN(UNIT_PRICE)             AS MEDIAN_PRICE,
+  MAX(UNIT_PRICE)                AS MAX_PRICE,
+  STDDEV_SAMP(UNIT_PRICE)        AS PRICE_STDDEV,
+  APPROX_PERCENTILE(UNIT_PRICE, 0.9) AS P90_PRICE
+FROM ORDERS;
+```
+
+> **Analytical habit:** a query can be syntactically correct and analytically wrong. Always confirm the row grain. `ORDERS` currently has one row per order item only because the sample says so; a real system may contain multiple line items per order.
+
+## Aggregations and business metrics
+
+Define net revenue as quantity multiplied by unit price after discount, and include only shipped orders:
+
+```sql
+SELECT
+  CATEGORY,
+  COUNT(DISTINCT ORDER_ID) AS ORDER_COUNT,
+  SUM(QUANTITY) AS UNITS,
+  ROUND(SUM(QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100)), 2)
+    AS NET_REVENUE,
+  ROUND(AVG(QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100)), 2)
+    AS AVG_ORDER_VALUE
+FROM ORDERS
+WHERE STATUS = 'SHIPPED'
+GROUP BY CATEGORY
+ORDER BY NET_REVENUE DESC;
+```
+
+`GROUP BY` changes the grain. The input is one row per sample order; the output is one row per category. Be explicit about whether cancelled and returned orders belong in a metric.
+
+Join customer attributes to order facts:
+
+```sql
+SELECT
+  COALESCE(c.REGION, 'Unknown') AS REGION,
+  COUNT(DISTINCT o.CUSTOMER_ID) AS ACTIVE_CUSTOMERS,
+  COUNT(DISTINCT o.ORDER_ID) AS SHIPPED_ORDERS,
+  ROUND(SUM(o.QUANTITY * o.UNIT_PRICE *
+            (1 - o.DISCOUNT_PCT / 100)), 2) AS NET_REVENUE
+FROM ORDERS o
+JOIN CUSTOMERS c
+  ON o.CUSTOMER_ID = c.CUSTOMER_ID
+WHERE o.STATUS = 'SHIPPED'
+GROUP BY COALESCE(c.REGION, 'Unknown')
+ORDER BY NET_REVENUE DESC;
+```
+
+Use a `LEFT JOIN` when the analysis should retain all customers, including those without orders. Filter conditions on the right-hand table can accidentally turn a left join into an inner join if placed carelessly in the `WHERE` clause.
+
+## Time-series analysis
+
+Snowflake provides rich date/time functions. Always know whether a timestamp is `NTZ` (no time-zone semantics), `LTZ` (session-local display), or `TZ` (stores an offset).
+
+Daily metrics:
+
+```sql
+SELECT
+  DATE_TRUNC('DAY', ORDER_TS)::DATE AS ORDER_DATE,
+  COUNT_IF(STATUS = 'SHIPPED') AS SHIPPED_ORDERS,
+  ROUND(SUM(IFF(
+    STATUS = 'SHIPPED',
+    QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100),
+    0
+  )), 2) AS NET_REVENUE
+FROM ORDERS
+GROUP BY ORDER_DATE
+ORDER BY ORDER_DATE;
+```
+
+Create a complete date spine so days with zero orders appear:
+
+```sql
+WITH DATE_SPINE AS (
+  SELECT DATEADD(DAY, SEQ4(), '2025-03-01'::DATE) AS CALENDAR_DATE
+  FROM TABLE(GENERATOR(ROWCOUNT => 11))
+), DAILY AS (
+  SELECT
+    ORDER_TS::DATE AS ORDER_DATE,
+    SUM(IFF(STATUS = 'SHIPPED',
+            QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100), 0))
+      AS NET_REVENUE
+  FROM ORDERS
+  GROUP BY ORDER_DATE
+)
+SELECT
+  d.CALENDAR_DATE,
+  COALESCE(x.NET_REVENUE, 0) AS NET_REVENUE
+FROM DATE_SPINE d
+LEFT JOIN DAILY x
+  ON d.CALENDAR_DATE = x.ORDER_DATE
+ORDER BY d.CALENDAR_DATE;
+```
+
+For global businesses, convert source times deliberately with `CONVERT_TIMEZONE` and document the reporting timezone. Avoid silently casting timestamps to dates before resolving timezone semantics.
+
+## Window functions: detail plus context
+
+Window functions calculate across related rows without collapsing them into one row per group. Their `OVER` clause defines partition, order, and optional frame.
+
+Rank orders within each customer:
+
+```sql
+SELECT
+  ORDER_ID,
+  CUSTOMER_ID,
+  ORDER_TS,
+  QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100) AS ORDER_VALUE,
+  ROW_NUMBER() OVER (
+    PARTITION BY CUSTOMER_ID
+    ORDER BY ORDER_TS
+  ) AS CUSTOMER_ORDER_NUMBER,
+  LAG(ORDER_TS) OVER (
+    PARTITION BY CUSTOMER_ID
+    ORDER BY ORDER_TS
+  ) AS PREVIOUS_ORDER_TS
+FROM ORDERS
+ORDER BY CUSTOMER_ID, ORDER_TS;
+```
+
+Use `QUALIFY` to filter after window functions—without an extra subquery:
+
+```sql
+SELECT
+  ORDER_ID,
+  CUSTOMER_ID,
+  ORDER_TS,
+  QUANTITY * UNIT_PRICE AS GROSS_VALUE
+FROM ORDERS
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY CUSTOMER_ID
+  ORDER BY ORDER_TS DESC
+) = 1;
+```
+
+Running and moving calculations:
+
+```sql
+WITH DAILY AS (
+  SELECT
+    ORDER_TS::DATE AS ORDER_DATE,
+    SUM(IFF(STATUS = 'SHIPPED',
+            QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100), 0))
+      AS REVENUE
+  FROM ORDERS
+  GROUP BY ORDER_DATE
+)
+SELECT
+  ORDER_DATE,
+  REVENUE,
+  SUM(REVENUE) OVER (
+    ORDER BY ORDER_DATE
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS CUMULATIVE_REVENUE,
+  AVG(REVENUE) OVER (
+    ORDER BY ORDER_DATE
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+  ) AS THREE_ROW_MOVING_AVG
+FROM DAILY
+ORDER BY ORDER_DATE;
+```
+
+The last calculation is a three-**row** moving average, not necessarily a three-calendar-day average. Build a date spine first if missing dates matter.
+
+<div class="exercise">
+<strong>Hands-on exercise 2 — Core analytics</strong>
+
+1. Calculate shipped net revenue by customer segment.
+2. Find each region's highest-value shipped order using `ROW_NUMBER()` and `QUALIFY`.
+3. Calculate the cancellation rate as cancelled orders divided by all orders. Use `NULLIF` to protect against division by zero.
+4. Return every customer, their total shipped revenue, and zero for customers with no shipped orders.
+5. Explain the grain of every intermediate result.
+</div>
+
+## Reusable transformations with CTEs and views
+
+Common table expressions (CTEs) make a complex query easier to test in layers. A view publishes a reusable logical result without storing another full copy of the rows.
+
+```sql
+CREATE OR REPLACE VIEW ANALYTICS_LAB.MART.V_SHIPPED_ORDER_METRICS AS
+WITH STANDARDIZED AS (
+  SELECT
+    ORDER_ID,
+    CUSTOMER_ID,
+    ORDER_TS,
+    CATEGORY,
+    QUANTITY,
+    UNIT_PRICE,
+    DISCOUNT_PCT,
+    QUANTITY * UNIT_PRICE AS GROSS_REVENUE,
+    QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100) AS NET_REVENUE
+  FROM ANALYTICS_LAB.MART.ORDERS
+  WHERE STATUS = 'SHIPPED'
+)
+SELECT * FROM STANDARDIZED;
+```
+
+For governed publishing, document the business definition, owner, refresh/freshness expectation, column meaning, and permitted audience. A view does not automatically guarantee that these semantics are correct.
+
+## Semi-structured data: JSON, VARIANT, and FLATTEN
+
+Snowflake can store semi-structured values in a `VARIANT` column. This is useful for event payloads, API responses, nested attributes, and data whose structure changes over time.
+
+Create a sample event table:
+
+```sql
+CREATE OR REPLACE TABLE ANALYTICS_LAB.RAW.EVENTS (
+  EVENT_ID NUMBER,
+  INGESTED_AT TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP(),
+  PAYLOAD VARIANT
+);
+
+INSERT INTO ANALYTICS_LAB.RAW.EVENTS (EVENT_ID, PAYLOAD)
+SELECT 1, PARSE_JSON('{
+  "user_id": 101,
+  "event_type": "checkout",
+  "device": {"type": "mobile", "os": "iOS"},
+  "items": [
+    {"sku": "KB-1", "qty": 2, "price": 75.00},
+    {"sku": "MS-1", "qty": 1, "price": 40.00}
+  ]
+}');
+```
+
+Use colon notation to navigate paths and cast values to analytical types:
+
+```sql
+SELECT
+  EVENT_ID,
+  PAYLOAD:event_type::VARCHAR AS EVENT_TYPE,
+  PAYLOAD:user_id::NUMBER AS USER_ID,
+  PAYLOAD:device.type::VARCHAR AS DEVICE_TYPE,
+  ARRAY_SIZE(PAYLOAD:items) AS ITEM_COUNT
+FROM ANALYTICS_LAB.RAW.EVENTS;
+```
+
+Explode a nested array with lateral `FLATTEN`:
+
+```sql
+SELECT
+  e.EVENT_ID,
+  e.PAYLOAD:user_id::NUMBER AS USER_ID,
+  item.VALUE:sku::VARCHAR AS SKU,
+  item.VALUE:qty::NUMBER AS QUANTITY,
+  item.VALUE:price::NUMBER(10,2) AS UNIT_PRICE,
+  item.VALUE:qty::NUMBER * item.VALUE:price::NUMBER(10,2) AS LINE_VALUE
+FROM ANALYTICS_LAB.RAW.EVENTS e,
+LATERAL FLATTEN(INPUT => e.PAYLOAD:items) item;
+```
+
+Key considerations:
+
+- preserve the original payload when it is useful for traceability;
+- cast important fields into stable types before publishing metrics;
+- handle absent keys, explicit JSON `null`, and SQL `NULL` deliberately;
+- monitor schema drift rather than assuming every event has the same shape; and
+- avoid repeatedly extracting heavily used attributes in every dashboard query—curate them into typed tables or views.
+
+## Time Travel, recovery, and zero-copy cloning
+
+**Time Travel** lets authorized users query or restore historical data within the configured retention window. Retention availability and maximum duration depend on object configuration, account edition, and object type.
+
+Capture a query ID before a change:
+
+```sql
+SELECT CURRENT_TIMESTAMP() AS BEFORE_CHANGE;
+
+UPDATE ORDERS
+SET DISCOUNT_PCT = 99
+WHERE ORDER_ID = 1001;
+```
+
+Query a recent historical state by timestamp, offset, or statement:
+
+```sql
+-- Example: look back five minutes, if within retention.
+SELECT *
+FROM ORDERS AT (OFFSET => -60 * 5)
+WHERE ORDER_ID = 1001;
+
+-- Or use the query ID of a statement that preceded the change.
+SELECT *
+FROM ORDERS BEFORE (STATEMENT => 'your_query_id_here')
+WHERE ORDER_ID = 1001;
+```
+
+Recover by selecting the historical row into the current table only after validating it. Time Travel is not a substitute for tested backup, disaster-recovery, and change-management practices.
+
+A **zero-copy clone** creates a fast, writable logical copy that initially shares unchanged storage:
+
+```sql
+CREATE OR REPLACE SCHEMA ANALYTICS_LAB.SANDBOX
+  CLONE ANALYTICS_LAB.MART;
+```
+
+Clones are valuable for isolated testing and reproducible experiments. “Zero-copy” does not mean “zero future storage cost”: changed data and retained history can add storage usage. Apply access controls to clones because they can contain sensitive data.
+
+## Secure data sharing and collaboration
+
+Secure Data Sharing lets a provider expose selected Snowflake objects to a consumer account without copying the underlying data into the consumer's account. The provider controls what is included; the consumer uses its own compute to query imported shared data. Listings and exchanges build additional discovery and distribution workflows on top of sharing concepts.
+
+A simplified provider-side pattern is:
+
+```sql
+-- Administrative example; account identifiers and privileges must be reviewed.
+CREATE SHARE IF NOT EXISTS RETAIL_ANALYTICS_SHARE;
+GRANT USAGE ON DATABASE ANALYTICS_LAB TO SHARE RETAIL_ANALYTICS_SHARE;
+GRANT USAGE ON SCHEMA ANALYTICS_LAB.MART TO SHARE RETAIL_ANALYTICS_SHARE;
+GRANT SELECT ON VIEW ANALYTICS_LAB.MART.V_SHIPPED_ORDER_METRICS
+  TO SHARE RETAIL_ANALYTICS_SHARE;
+
+-- Then add an approved consumer account using the syntax and identifiers
+-- required for your organization and region.
+```
+
+Prefer secure views or other governed interfaces when the consumer should not see underlying implementation or sensitive columns. Validate that a view cannot reveal restricted information through indirect inference, and establish contracts for schema changes and freshness.
+
+## Snowsight for interactive analytics
+
+An analyst can use Snowsight Workspaces to:
+
+- write, save, organize, and share SQL and notebook files;
+- keep project files in folders and integrate selected workflows with Git;
+- inspect query history, operator-level query profiles, and warehouse load;
+- compare and pin query results while iterating on an analysis;
+- browse objects, columns, ownership, and selected governance metadata;
+- monitor warehouses, consumption, tasks, and data pipelines, subject to privileges; and
+- collaborate with reproducible SQL rather than screenshots of ad hoc results.
+
+Workspaces is convenient for exploration, development, and reproducible code. A dedicated BI platform may be a better fit for governed enterprise semantic models, scheduled distribution, or complex dashboard interactions.
+
+## Business intelligence integration
+
+Snowflake connects to common BI tools through native integrations or standard drivers such as JDBC and ODBC. Typical tools include Tableau, Microsoft Power BI, Looker, Sigma, and many others. The exact setup depends on the tool, identity provider, network policy, and deployment model.
+
+A robust BI pattern includes:
+
+- a dedicated warehouse for dashboard concurrency;
+- a dedicated role with read access only to curated schemas;
+- SSO/OAuth or key-pair authentication instead of shared passwords;
+- small, well-defined fact and dimension models or a governed semantic layer;
+- query tags to attribute workload to a tool, team, or dashboard;
+- auto-suspend tuned to usage patterns; and
+- monitoring for queued queries, inefficient scans, refresh failures, and credit usage.
+
+```sql
+ALTER SESSION SET QUERY_TAG = 'team=finance;tool=bi;dashboard=margin';
+```
+
+Avoid connecting production dashboards directly to unstable raw ingestion tables. Curated views or tables create a clearer contract and isolate downstream users from source-system changes.
+
+## Python, Snowpark, and machine-learning integration
+
+**Snowpark** provides DataFrame-style APIs and execution capabilities that push work to Snowflake. It is useful when SQL alone is awkward, when teams prefer Python/Java/Scala APIs, or when feature engineering and model workflows should run close to governed data. Snowpark ML and Snowflake's broader AI/ML features can support preprocessing, training, registry/management, and inference scenarios; availability and appropriate architecture depend on the account, region, feature, and governance requirements.
+
+Conceptual Python example:
+
+```python
+# Run in an environment with a configured Snowpark session.
+from snowflake.snowpark import functions as F
+
+orders = session.table("ANALYTICS_LAB.MART.ORDERS")
+
+features = (
+    orders
+    .filter(F.col("STATUS") == "SHIPPED")
+    .with_column(
+        "NET_REVENUE",
+        F.col("QUANTITY") * F.col("UNIT_PRICE") *
+        (F.lit(1) - F.col("DISCOUNT_PCT") / F.lit(100))
+    )
+    .group_by("CUSTOMER_ID")
+    .agg(
+        F.sum("NET_REVENUE").alias("LIFETIME_REVENUE"),
+        F.count_distinct("ORDER_ID").alias("ORDER_COUNT")
+    )
+)
+
+features.show()
+```
+
+External ecosystems can also connect through Python connectors, JDBC/ODBC, Spark connectors, partner tools, and APIs. Decide where computation belongs by considering data movement, governance, package support, latency, cost, observability, and team skills.
+
+For machine learning, good platform architecture does not replace good science. Use point-in-time-correct features, prevent target leakage, record training datasets and code versions, validate across meaningful time periods, monitor drift, and secure sensitive features and predictions.
+
+## Incremental and continuously refreshed analytics
+
+Analytics often needs fresher data than a nightly full rebuild. Snowflake provides multiple patterns:
+
+- **Streams** track a change-data-capture offset for supported objects.
+- **Tasks** run SQL on a schedule or when triggered by predecessor conditions.
+- **Dynamic tables** declaratively maintain query results toward a target freshness.
+- **Snowpipe and streaming ingestion options** load arriving data with less manual orchestration.
+
+Choose based on freshness, transformation complexity, operational ownership, recovery behavior, and cost. Test idempotency and late-arriving data. A pipeline is not complete until failures, retries, lineage, and freshness alerts have owners.
+
+<div class="exercise">
+<strong>Hands-on exercise 3 — Semi-structured and published analytics</strong>
+
+1. Add a second JSON event with a different device and three items.
+2. Flatten both events and calculate revenue by device type.
+3. Create a view that exposes typed event columns but not the original payload.
+4. Clone the `RAW` schema into a sandbox and verify that row counts initially match.
+5. Design a secure sharing interface for only daily category revenue; list the columns you would intentionally exclude.
+</div>
+
+# Part IV — Performance, security, and cost
+
+## A practical performance method
+
+Performance tuning should begin with evidence, not folklore:
+
+1. Find the exact query in Query History.
+2. Record elapsed time, bytes scanned, rows produced, warehouse, queueing, and query tag.
+3. Open the Query Profile and locate expensive operators, spilling, or row explosion.
+4. Verify filters, joins, grain, and pruning before spending more compute.
+5. Change one variable, rerun under comparable conditions, and measure again.
+
+### Write efficient analytical SQL
+
+- Select only needed columns instead of using `SELECT *` in production pipelines.
+- Filter early when it preserves semantics and use sargable predicates on large datasets.
+- Do not wrap a pruning column in unnecessary functions; express bounded ranges directly.
+- Aggregate before a many-to-many join when the analysis permits it.
+- Check for fan-out by comparing counts before and after joins.
+- Use approximate functions when a documented error trade-off is acceptable.
+- Materialize expensive, reused transformations only when refresh and storage trade-offs justify it.
+- Bound queries against large history views by time and select explicit columns.
+
+For example, prefer a timestamp range:
+
+```sql
+WHERE ORDER_TS >= '2025-03-01'::TIMESTAMP_NTZ
+  AND ORDER_TS <  '2025-04-01'::TIMESTAMP_NTZ
+```
+
+over relying only on a transformed predicate such as `DATE_TRUNC('MONTH', ORDER_TS) = ...`, especially on a large table.
+
+### Understand caching and pruning
+
+Snowflake can reuse persisted query results when the query and relevant conditions allow it. A running warehouse can also retain local data cache. Caches are useful, but a cached benchmark may not represent a cold or changed workload. Record test conditions.
+
+Micro-partition pruning reduces scanning when metadata proves that partitions cannot match. Natural load order often helps time-based filters. Clustering keys or specialized optimization services may help particular large-table access patterns, but they add maintenance or service cost. Use query evidence and cost-benefit measurement before enabling them.
+
+### Size for the bottleneck
+
+- If one complex query spills or runs slowly, test a larger warehouse and compare total credits as well as time.
+- If many independent queries queue, consider workload separation or multi-cluster concurrency.
+- If queries scan far too much data, first fix filters, joins, and model design; warehouse size does not correct bad semantics.
+- Separate ingestion, transformation, ad hoc, data science, and BI workloads when isolation has operational value.
+
+## Security fundamentals
+
+Snowflake combines role-based access control (RBAC) with ownership and object privileges. A strong baseline includes:
+
+- grant privileges to roles, then grant roles to users or functional roles;
+- use least privilege and separate object-access roles from job-function roles;
+- keep powerful system roles for administration, not daily analysis;
+- require strong authentication such as SSO/MFA or workload identity/key-pair patterns;
+- rotate credentials and never put secrets in SQL files or source control;
+- apply network controls where appropriate;
+- protect sensitive columns with masking policies and populations with row access policies;
+- classify/tag sensitive data and audit access/query history;
+- use separate development and production environments with controlled promotion; and
+- periodically review grants, future grants, ownership, dormant users, and shared data.
+
+### Role hierarchy example
+
+```text
+SYSADMIN
+└── ANALYTICS_FUNCTIONAL_ROLE
+    ├── SALES_MART_READER_ROLE
+    └── BI_WAREHOUSE_USER_ROLE
+```
+
+The reader role carries data-object privileges; the warehouse-user role carries compute privileges; the functional role inherits both. This makes the source of access easier to reason about.
+
+Inspect grants:
+
+```sql
+SHOW GRANTS TO ROLE ANALYST_ROLE;
+SHOW GRANTS ON TABLE ANALYTICS_LAB.MART.ORDERS;
+```
+
+### Masking-policy pattern
+
+The precise role model should be designed before implementation, but the core idea is that a policy returns either a clear value or a protected representation based on the active authorization context.
+
+```sql
+CREATE OR REPLACE MASKING POLICY ANALYTICS_LAB.MART.NAME_MASK AS
+  (VALUE VARCHAR) RETURNS VARCHAR ->
+    CASE
+      WHEN IS_ROLE_IN_SESSION('PII_READER_ROLE') THEN VALUE
+      ELSE '***MASKED***'
+    END;
+
+ALTER TABLE ANALYTICS_LAB.MART.CUSTOMERS
+  MODIFY COLUMN CUSTOMER_NAME
+  SET MASKING POLICY ANALYTICS_LAB.MART.NAME_MASK;
+```
+
+Test policies with representative roles and downstream tools. Policy ownership, exemption privileges, and role activation can affect behavior.
+
+## Cost model and controls
+
+Think in cost categories instead of asking only, “What size is the warehouse?”
+
+| Category | Common drivers | Control ideas |
+|---|---|---|
+| Warehouse compute | Size × running time; cluster count; workload frequency | Auto-suspend, right-size, isolate workloads, query tuning |
+| Serverless features | Feature-specific managed compute | Budgets, feature usage views, workload design |
+| Storage | Table data, clones after changes, Time Travel/Failsafe effects | Retention policy, lifecycle review, avoid unused copies |
+| Cloud services | Metadata and coordination activity beyond included thresholds | Efficient metadata/query patterns, usage monitoring |
+| Data transfer | Cross-region/cloud egress and some sharing patterns | Place workloads deliberately, understand transfer paths |
+
+Warehouse usage is billed by credits according to the warehouse's configuration and running time, subject to Snowflake's current billing rules. Dollar cost per credit depends on contract, edition, cloud, and region, so do not hard-code a universal price into a business case.
+
+### Essential cost controls
+
+1. Start with an appropriately small warehouse and measure.
+2. Enable auto-suspend and usually auto-resume.
+3. Restrict who can create, resize, or disable suspension on warehouses.
+4. Use resource monitors for user-managed warehouse credit thresholds.
+5. Use budgets and cost-management views for broader supported compute, including relevant serverless usage.
+6. Tag or otherwise attribute resources and queries to teams and projects.
+7. Review warehouse load, metering, expensive queries, storage growth, and unused objects.
+8. Set statement timeouts where runaway work is a risk.
+
+Administrative resource-monitor example:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE RESOURCE MONITOR LEARNING_MONITOR
+  WITH CREDIT_QUOTA = 10
+  FREQUENCY = MONTHLY
+  START_TIMESTAMP = IMMEDIATELY
+  TRIGGERS
+    ON 75 PERCENT DO NOTIFY
+    ON 100 PERCENT DO SUSPEND;
+
+ALTER WAREHOUSE ANALYTICS_WH
+  SET RESOURCE_MONITOR = LEARNING_MONITOR;
+```
+
+Review notification configuration and understand that resource monitors cover user-managed virtual warehouses, not every possible Snowflake cost. Suspension can interrupt work, so production thresholds need operational owners and escalation procedures.
+
+Monitor recent warehouse metering with an explicit time bound:
+
+```sql
+SELECT
+  WAREHOUSE_NAME,
+  DATE_TRUNC('DAY', START_TIME) AS USAGE_DAY,
+  SUM(CREDITS_USED) AS CREDITS_USED
+FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
+WHERE START_TIME >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+GROUP BY WAREHOUSE_NAME, USAGE_DAY
+ORDER BY USAGE_DAY DESC, CREDITS_USED DESC;
+```
+
+Account Usage views have privilege requirements and can have latency. Use the appropriate organizational cost interface for authoritative financial reporting.
+
+<div class="exercise">
+<strong>Hands-on exercise 4 — Operate responsibly</strong>
+
+1. Add a query tag for your lab session and find the tagged queries in Query History.
+2. Compare the Query Profile for a selective filter and an unfiltered scan.
+3. Inspect all grants to your current role and identify which privilege allows warehouse use.
+4. Find the auto-suspend setting for `ANALYTICS_WH`.
+5. Draft a monthly control checklist covering compute, storage, failed pipelines, and access reviews.
+</div>
+
+# Part V — Capstone: build a small analytics product
+
+## Business question
+
+Create a daily sales product that helps a retail manager answer:
+
+- What shipped revenue and units were recorded each day?
+- Which category contributed most?
+- How many customers were active?
+- How does cumulative revenue change over time?
+
+## Acceptance criteria
+
+Your result should:
+
+- have one row per calendar date and category;
+- include dates with zero shipped sales if they fall in the reporting period;
+- exclude cancelled, returned, and processing orders from revenue;
+- calculate discount-adjusted revenue;
+- expose only non-sensitive attributes;
+- be reproducible as a view or scheduled table; and
+- include an owner, metric definition, freshness target, and validation query.
+
+## One possible implementation
+
+```sql
+CREATE OR REPLACE VIEW ANALYTICS_LAB.MART.V_DAILY_CATEGORY_SALES AS
+WITH DATE_SPINE AS (
+  SELECT DATEADD(DAY, SEQ4(), '2025-03-01'::DATE) AS SALES_DATE
+  FROM TABLE(GENERATOR(ROWCOUNT => 11))
+), CATEGORIES AS (
+  SELECT DISTINCT CATEGORY FROM ANALYTICS_LAB.MART.ORDERS
+), DAILY AS (
+  SELECT
+    ORDER_TS::DATE AS SALES_DATE,
+    CATEGORY,
+    SUM(QUANTITY) AS UNITS,
+    COUNT(DISTINCT ORDER_ID) AS ORDERS,
+    COUNT(DISTINCT CUSTOMER_ID) AS ACTIVE_CUSTOMERS,
+    SUM(QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100))
+      AS NET_REVENUE
+  FROM ANALYTICS_LAB.MART.ORDERS
+  WHERE STATUS = 'SHIPPED'
+  GROUP BY SALES_DATE, CATEGORY
+)
+SELECT
+  d.SALES_DATE,
+  c.CATEGORY,
+  COALESCE(x.UNITS, 0) AS UNITS,
+  COALESCE(x.ORDERS, 0) AS ORDERS,
+  COALESCE(x.ACTIVE_CUSTOMERS, 0) AS ACTIVE_CUSTOMERS,
+  ROUND(COALESCE(x.NET_REVENUE, 0), 2) AS NET_REVENUE
+FROM DATE_SPINE d
+CROSS JOIN CATEGORIES c
+LEFT JOIN DAILY x
+  ON d.SALES_DATE = x.SALES_DATE
+ AND c.CATEGORY = x.CATEGORY;
+```
+
+Add cumulative revenue at query time:
+
+```sql
+SELECT
+  SALES_DATE,
+  CATEGORY,
+  NET_REVENUE,
+  SUM(NET_REVENUE) OVER (
+    PARTITION BY CATEGORY
+    ORDER BY SALES_DATE
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS CATEGORY_CUMULATIVE_REVENUE
+FROM ANALYTICS_LAB.MART.V_DAILY_CATEGORY_SALES
+ORDER BY CATEGORY, SALES_DATE;
+```
+
+## Validation checklist
+
+- Reconcile total view revenue to a direct sum of shipped order revenue.
+- Confirm the row count equals number of dates multiplied by number of categories.
+- Check that every date/category pair is unique.
+- Confirm zero days use numeric zero, not missing rows.
+- Test boundary timestamps and reporting timezone rules.
+- Test access with the intended consumer role.
+- Inspect the Query Profile and warehouse cost under realistic data volume.
+
+```sql
+-- Uniqueness test: should return zero rows.
+SELECT SALES_DATE, CATEGORY, COUNT(*) AS COPIES
+FROM ANALYTICS_LAB.MART.V_DAILY_CATEGORY_SALES
+GROUP BY SALES_DATE, CATEGORY
+HAVING COUNT(*) > 1;
+
+-- Reconciliation: DIFFERENCE should be zero (within rounding policy).
+WITH SOURCE_TOTAL AS (
+  SELECT SUM(QUANTITY * UNIT_PRICE * (1 - DISCOUNT_PCT / 100)) AS VALUE
+  FROM ANALYTICS_LAB.MART.ORDERS
+  WHERE STATUS = 'SHIPPED'
+), VIEW_TOTAL AS (
+  SELECT SUM(NET_REVENUE) AS VALUE
+  FROM ANALYTICS_LAB.MART.V_DAILY_CATEGORY_SALES
+)
+SELECT SOURCE_TOTAL.VALUE - VIEW_TOTAL.VALUE AS DIFFERENCE
+FROM SOURCE_TOTAL CROSS JOIN VIEW_TOTAL;
+```
+
+# Best-practice checklist
+
+## For analysts
+
+- State metric definition, grain, population, time range, and timezone.
+- Profile inputs before joining and compare row counts after joins.
+- Use fully qualified names in durable scripts.
+- Avoid `SELECT *` in published models.
+- Use CTE names that describe transformations, not steps like `TMP1`.
+- Treat `NULL`, zero, unknown, and not applicable as distinct concepts.
+- Validate with an independent calculation or trusted total.
+- Add query tags for attribution and troubleshooting.
+
+## For data platform teams
+
+- Separate workload warehouses when isolation and ownership justify it.
+- Build a maintainable role hierarchy and review grants regularly.
+- Configure authentication, network controls, and secret management.
+- Protect sensitive data with governed policies and curated interfaces.
+- Establish naming, environment, retention, ownership, and deprecation standards.
+- Monitor freshness, failures, query performance, warehouse queueing, and total cost.
+- Test recovery and Time Travel procedures before an incident.
+- Document contracts for shared data and downstream dependencies.
+
+## Common beginner mistakes
+
+| Mistake | Why it causes trouble | Better approach |
+|---|---|---|
+| Leaving a warehouse running | Avoidable credit consumption | Set and verify auto-suspend |
+| Using `ACCOUNTADMIN` daily | Excessive privilege and poor attribution | Use a task-specific least-privilege role |
+| Confusing warehouse with database | Compute and storage are separate | Inspect all session contexts |
+| Joining without checking grain | Duplicated metrics | Profile keys and test join cardinality |
+| Ignoring status/refunds | Inflated revenue | Write an explicit metric contract |
+| Casting time without timezone rules | Wrong reporting date | Standardize and document timezone semantics |
+| Treating JSON as permanently schema-free | Fragile dashboards and silent drift | Curate important fields into typed models |
+| Scaling compute before profiling | Higher cost without fixing query logic | Inspect Query Profile and bytes scanned |
+| Assuming Time Travel is backup | Retention and recovery scope may be insufficient | Maintain tested recovery/continuity plans |
+
+# Quick SQL reference
+
+```sql
+-- Context
+SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA();
+USE ROLE ANALYST_ROLE;
+USE WAREHOUSE ANALYTICS_WH;
+USE DATABASE ANALYTICS_LAB;
+USE SCHEMA MART;
+
+-- Discover
+SHOW TABLES IN SCHEMA ANALYTICS_LAB.MART;
+DESC TABLE ANALYTICS_LAB.MART.ORDERS;
+
+-- Operate compute
+ALTER WAREHOUSE ANALYTICS_WH RESUME;
+ALTER WAREHOUSE ANALYTICS_WH SUSPEND;
+ALTER WAREHOUSE ANALYTICS_WH SET WAREHOUSE_SIZE = 'SMALL';
+
+-- Query patterns
+SELECT ... FROM ... WHERE ... GROUP BY ... HAVING ... ORDER BY ...;
+SELECT ... FROM ... QUALIFY ROW_NUMBER() OVER (...) = 1;
+
+-- History and explainability
+SELECT LAST_QUERY_ID();
+EXPLAIN USING TEXT SELECT * FROM ANALYTICS_LAB.MART.ORDERS;
+```
+
+# Glossary
+
+| Term | Plain-language definition |
+|---|---|
+| Account | Snowflake administrative boundary containing databases, warehouses, users, roles, and other objects |
+| Cloud services | Coordination layer for authentication, metadata, optimization, transactions, and infrastructure management |
+| Credit | Snowflake unit used to measure consumption of compute and certain services |
+| Database | Named top-level container for schemas and data objects |
+| Dynamic table | Declaratively refreshed result of a query with a target freshness concept |
+| ELT | Extract, load, then transform data in the analytical platform |
+| FLATTEN | Table function that expands arrays or objects from semi-structured data into rows |
+| Grain | What one row represents, such as one order, order line, or customer-day |
+| Micro-partition | Snowflake-managed immutable storage unit with metadata used for pruning |
+| Multi-cluster warehouse | Warehouse configuration that can use multiple clusters to handle concurrency |
+| Pruning | Skipping storage partitions that cannot satisfy a query predicate |
+| Query Profile | Operator-level visual evidence about how a query executed |
+| Query tag | Session or statement metadata used to attribute and find queries |
+| RBAC | Role-based access control: privileges are organized through roles |
+| Resource monitor | Control that tracks user-managed warehouse credits and can notify or suspend at thresholds |
+| Role | Securable object that can hold privileges and be granted to users or other roles |
+| Schema | Namespace inside a database that contains tables, views, and related objects |
+| Secure Data Sharing | Governed access to provider data from another Snowflake account without copying the underlying data into the consumer account |
+| Snowsight | Snowflake web interface for SQL, exploration, administration, and monitoring; Workspaces is its current file-based editor |
+| Snowpark | APIs and runtimes for processing data in Snowflake using languages and DataFrame patterns beyond SQL |
+| Stage | Named or implicit location used for loading or unloading files |
+| Stream | Object that records a change-tracking offset for incremental processing |
+| Task | Scheduled or dependency-driven execution of SQL or procedural work |
+| Time Travel | Access to historical object data within a configured retention window |
+| VARIANT | Snowflake type that can store semi-structured values such as JSON |
+| View | Named SQL query that presents a logical table |
+| Virtual warehouse | Independent compute cluster that executes queries and data operations |
+| Zero-copy clone | Fast logical copy that initially shares unchanged storage with its source |
+
+# Further learning and official documentation
+
+Snowflake behavior, availability, limits, UI labels, and billing rules can change. Confirm production decisions in the current official documentation and your contract:
+
+- [Snowflake key concepts and architecture](https://docs.snowflake.com/en/user-guide/intro-key-concepts)
+- [Virtual warehouse overview](https://docs.snowflake.com/en/user-guide/warehouses-overview)
+- [Snowsight Workspaces](https://docs.snowflake.com/en/user-guide/ui-snowsight/workspaces)
+- [Querying semi-structured data](https://docs.snowflake.com/en/user-guide/querying-semistructured)
+- [Understanding and using Time Travel](https://docs.snowflake.com/en/user-guide/data-time-travel)
+- [Secure Data Sharing overview](https://docs.snowflake.com/en/user-guide/data-sharing-intro)
+- [Access control overview and best practices](https://docs.snowflake.com/en/user-guide/security-access-control-overview)
+- [Cost management](https://docs.snowflake.com/en/user-guide/cost-understanding-overall)
+- [Snowpark developer guides](https://docs.snowflake.com/en/developer-guide/snowpark/index)
+- [Snowflake SQL command reference](https://docs.snowflake.com/en/sql-reference-commands)
+
+## Suggested learning path after this guide
+
+1. Rebuild the capstone with a larger public or organizational dataset.
+2. Learn dimensional modeling and define a governed metric layer.
+3. Practice file loading with stages, file formats, and `COPY INTO`.
+4. Build one incremental pipeline and define recovery behavior.
+5. Connect a BI tool using a read-only role and dedicated warehouse.
+6. Compare equivalent SQL and Snowpark transformations.
+7. Review query profiles and cost attribution for a full week of workload.
+
+The most important Snowflake skill is not memorizing commands. It is keeping four questions visible in every project: **What does one row mean? Who may access it? What compute is doing the work? How will correctness, freshness, and cost be verified?**
+
+<div class="footer-note">
+The V Lab · Snowflake Learning Module. Examples are for education; review account edition, privileges, cost, and current official documentation before production use.
+</div>

@@ -1,0 +1,1383 @@
+---
+title: "Snowflake 入门与数据分析实战"
+pagetitle: "Snowflake 入门与数据分析实战 | The V Lab"
+subtitle: "从云数据平台基础到分析、治理、性能与成本管理"
+author: "The V Lab · 学习版教程"
+date: "更新日期：2026-08-11"
+lang: zh-CN
+toc-title: "目录"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 3
+    number_sections: true
+    anchor_sections: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    code_download: false
+    df_print: paged
+    css: snowflake_styles.css
+    includes:
+      before_body: includes/vlab-brand.html
+---
+
+<nav class="language-switch" aria-label="课程导航">
+  <span class="language-home">The V Lab · Snowflake 学习模块</span>
+  <span class="language-option active" aria-current="page">中文版</span>
+  <a class="language-option" href="snowflake_guide_en.html" lang="en">English</a>
+</nav>
+
+<div class="module-bar">
+  <div class="module-stat"><strong>适用对象</strong><span>数据分析师、数据工程师与技术管理者</span></div>
+  <div class="module-stat"><strong>建议学习时长</strong><span>约 120–180 分钟，含 SQL 练习</span></div>
+  <div class="module-stat"><strong>先修要求</strong><span>基础 SQL；可选 Snowflake 学习账户</span></div>
+</div>
+
+# 如何使用本教程
+
+这份教程面向第一次接触 Snowflake 的数据分析师、数据工程师和技术管理者。完成后，你应该能够：
+
+- 解释 Snowflake 为什么能把存储与计算独立扩展；
+- 看懂账户、数据库、模式、表、视图、角色和虚拟仓库之间的关系；
+- 在 Snowsight 中创建一个小型分析环境，写出常见分析 SQL；
+- 分析结构化与半结构化数据，使用窗口函数、`QUALIFY`、Time Travel 和零复制克隆；
+- 理解数据共享、BI、Snowpark/ML 的衔接方式；
+- 用最小权限、自动暂停、资源监控器和使用量视图控制风险与成本；
+- 知道查询变慢时应先检查什么，而不是盲目扩大仓库。
+
+## 示例的执行约定
+
+本教程中的 SQL 分为三类：
+
+| 标记 | 含义 |
+|---|---|
+| **可直接练习** | 在具备相应权限的 Snowflake 学习账户中可顺序执行 |
+| **需要管理员** | 涉及创建仓库、角色、共享或成本控制，应由管理员审核 |
+| **情景示例** | 需要外部文件、另一个账户、特定版本/区域或历史数据，不能原样运行 |
+
+<div class="callout warning">
+所有会启动虚拟仓库的语句都可能产生计算费用。请使用学习账户、最小仓库，并在结束后执行本教程末尾的清理步骤。不同云、区域、版本和合同的功能可用性与单价可能不同；生产决策应以你账户中的官方文档和价格表为准。
+</div>
+
+## 先决条件
+
+- 一个 Snowflake 账户，以及登录 Snowsight 的权限；
+- 可使用某个虚拟仓库，或有权创建学习仓库；
+- 可在某个数据库/模式中创建对象；
+- 基本 SQL 知识会有帮助，但不是必需。
+
+不想创建对象时，也可以先使用账户内置的 `SNOWFLAKE_SAMPLE_DATA`（若管理员已导入）阅读查询章节。
+
+# Snowflake 是什么
+
+Snowflake 是运行在公有云上的托管数据平台。对分析人员而言，它最重要的价值不是“另一种 SQL 数据库”，而是：
+
+1. 用集中、受治理的数据支持多个独立计算工作负载；
+2. 让交互式分析、ELT、BI、数据科学与数据共享尽量减少彼此争抢资源；
+3. 通过 SQL 和生态连接器处理关系数据与 JSON、Parquet 等半结构化数据；
+4. 按存储、计算、数据传输和部分服务能力分别计量。
+
+一个典型分析链路如下：
+
+<div class="flow">
+  <span class="box">业务系统 / 文件 / 事件</span>
+  <span class="arrow">→</span>
+  <span class="box">Stage / Snowpipe / Connector</span>
+  <span class="arrow">→</span>
+  <span class="box">原始层</span>
+  <span class="arrow">→</span>
+  <span class="box">转换与数据集市</span>
+  <span class="arrow">→</span>
+  <span class="box">Snowsight / BI / ML / Share</span>
+</div>
+
+## 最关键的心智模型：三层架构
+
+Snowflake 的核心架构可以简化为三层：
+
+| 层 | 负责什么 | 初学者应记住什么 |
+|---|---|---|
+| 数据库存储层 | 压缩、加密和组织表数据；维护微分区及其元数据 | 你不管理磁盘、索引文件或分片；存储独立计费 |
+| 查询处理层 | 虚拟仓库执行查询、`COPY` 和 DML | 仓库是计算资源，不“装”数据；多个仓库可查询同一份数据 |
+| 云服务层 | 登录认证、元数据、访问控制、事务、查询解析与优化、基础设施协调等 | 即使仓库暂停，对象元数据仍存在；部分云服务使用也会计量 |
+
+官方将这一架构概括为存储、计算和云服务的分离，参见 [Snowflake 关键概念与架构](https://docs.snowflake.com/en/user-guide/intro-key-concepts)。
+
+### 存储与计算分离带来的效果
+
+- **独立伸缩**：数据量增长不强迫你长期运行更大的计算集群。
+- **工作负载隔离**：可以给 BI、数据加载、数据科学分别配置仓库。
+- **并发弹性**：一个仓库忙时，另一个仓库仍可访问同一数据。
+- **暂停计算**：仓库暂停后不再产生该仓库的运行计算消耗，数据仍保留。
+- **按任务选型**：短时重任务可临时放大仓库，结束后缩小或暂停。
+
+<div class="callout">
+一句话记忆：数据库和表回答“数据在哪里、如何组织”，虚拟仓库回答“用多少计算来处理它”。
+</div>
+
+### 微分区与列式存储
+
+Snowflake 自动把表数据组织成不可变、列式的微分区，并记录每个微分区的元数据，例如某些列的值域。查询含有选择性过滤条件时，优化器可以跳过不相关的微分区，这叫 **micro-partition pruning（微分区裁剪）**。
+
+这意味着：
+
+- 通常不需要像传统数据库那样手工创建普通 B-tree 索引；
+- 过滤条件是否能帮助裁剪，往往比“写得短不短”更重要；
+- 数据自然聚集变差后，才考虑聚类键、搜索优化或物化视图；
+- 应通过 Query Profile 和真实工作负载验证，而不是预先优化一切。
+
+## 对象层级与会话上下文
+
+常见层级可以画成：
+
+```
+组织 Organization
+└── 账户 Account
+    ├── 用户、角色、虚拟仓库、资源监控器等账户级对象
+    └── 数据库 Database
+        └── 模式 Schema
+            ├── 表 / 视图 / 动态表
+            ├── Stage / File Format / Sequence
+            ├── Stream / Task / Pipe
+            └── Function / Procedure / Model 等
+```
+
+### 三段式对象名
+
+`ANALYTICS_DB.MART.ORDERS` 的三部分分别是：
+
+1. `ANALYTICS_DB`：数据库；
+2. `MART`：模式；
+3. `ORDERS`：对象名。
+
+如果会话已经执行：
+
+```sql
+USE DATABASE ANALYTICS_DB;
+USE SCHEMA MART;
+```
+
+后续可只写 `ORDERS`。教学中简写方便，生产 SQL 更推荐在跨模式查询时写完全限定名，减少上下文错误。
+
+### 四个经常被混淆的上下文
+
+```sql
+SELECT
+  CURRENT_ROLE(),
+  CURRENT_WAREHOUSE(),
+  CURRENT_DATABASE(),
+  CURRENT_SCHEMA();
+```
+
+| 上下文 | 决定什么 |
+|---|---|
+| Role | 当前操作“被允许做什么” |
+| Warehouse | 查询或 DML “在哪里计算” |
+| Database / Schema | 未完全限定的对象名“去哪里找” |
+
+SQL 通常不区分未加双引号标识符的大小写：`orders` 会被解释为 `ORDERS`。只有明确需要保留大小写或特殊字符时才使用双引号；团队中应避免不必要的引号命名。
+
+# 虚拟仓库：计算资源的控制面
+
+虚拟仓库是执行 SQL、加载数据和多数 DML 的计算集群。仓库不保存表数据，因此删除仓库不会删除数据库中的表，但会失去相应计算配置。
+
+## 调大与扩并发不是一回事
+
+| 动作 | 主要解决 | 直觉 |
+|---|---|---|
+| Scale up：XS → S → M | 单条查询需要更多 CPU/内存，或发生大量落盘 | 让一个集群更强 |
+| Scale out：多集群 | 大量并发查询排队 | 让多个集群同时服务 |
+| 创建独立仓库 | 不同团队/任务互相影响 | 隔离 BI、ELT、数据科学 |
+
+标准 Gen1 仓库通常每升一级，满小时信用消耗约翻倍；新一代仓库、不同区域和特性可能不同。Snowflake 对仓库按秒计量，但每次启动通常有 60 秒最低计费。参见 [虚拟仓库概览](https://docs.snowflake.com/en/user-guide/warehouses-overview)。
+
+## 一个适合学习的仓库
+
+以下语句 **需要创建仓库权限**，并可能产生费用：
+
+```sql
+USE ROLE SYSADMIN;
+
+CREATE WAREHOUSE IF NOT EXISTS LEARN_WH
+  WAREHOUSE_SIZE = 'XSMALL'
+  AUTO_SUSPEND = 60
+  AUTO_RESUME = TRUE
+  INITIALLY_SUSPENDED = TRUE
+  COMMENT = 'Warehouse for Snowflake learning exercises';
+
+USE WAREHOUSE LEARN_WH;
+```
+
+参数解释：
+
+- `WAREHOUSE_SIZE = 'XSMALL'`：从最小规格开始；
+- `AUTO_SUSPEND = 60`：无活动 60 秒后自动暂停；
+- `AUTO_RESUME = TRUE`：提交需要计算的语句时自动恢复；
+- `INITIALLY_SUSPENDED = TRUE`：创建时不立即启动。
+
+<div class="callout warning">
+自动暂停值并非越短越好。如果查询每隔两三分钟到达，频繁暂停/恢复会反复触发启动最低计费，还会失去仓库本地缓存。应根据实际空闲间隔设定。
+</div>
+
+## 缓存的三个实用认识
+
+初学时可以这样区分：
+
+- **结果缓存**：相同查询在数据与权限等条件未变化时，可能直接复用已有结果，不必由仓库重新计算；
+- **仓库本地数据缓存**：运行中的仓库可复用已读取的数据；暂停后不应依赖其继续存在；
+- **元数据/服务层能力**：帮助优化器规划和裁剪数据。
+
+因此，比较查询性能时应记录是否命中缓存；不要把第二次运行的速度直接当成首次运行能力。
+
+# 快速上手：建立可重复的练习环境
+
+下面构造一个小型电商分析场景。除“创建仓库”外，示例需要当前角色有创建数据库/模式/表的权限。
+
+## 第 1 步：创建数据库和模式
+
+```sql
+USE ROLE SYSADMIN;
+USE WAREHOUSE LEARN_WH;
+
+CREATE DATABASE IF NOT EXISTS SF_LEARNING_DB
+  COMMENT = 'Objects created by the Snowflake beginner guide';
+
+CREATE SCHEMA IF NOT EXISTS SF_LEARNING_DB.ANALYTICS;
+
+USE DATABASE SF_LEARNING_DB;
+USE SCHEMA ANALYTICS;
+```
+
+如果没有创建数据库权限，请让管理员提供沙箱数据库，把后续 `USE DATABASE` 改为该数据库。
+
+## 第 2 步：创建维度表和事实表
+
+```sql
+CREATE OR REPLACE TABLE CUSTOMERS (
+  CUSTOMER_ID  NUMBER        NOT NULL,
+  CUSTOMER_NAME VARCHAR      NOT NULL,
+  SIGNUP_DATE  DATE          NOT NULL,
+  REGION       VARCHAR       NOT NULL,
+  SEGMENT      VARCHAR       NOT NULL,
+  CONSTRAINT PK_CUSTOMERS PRIMARY KEY (CUSTOMER_ID)
+);
+
+CREATE OR REPLACE TABLE ORDERS (
+  ORDER_ID     NUMBER        NOT NULL,
+  CUSTOMER_ID  NUMBER        NOT NULL,
+  ORDER_TS     TIMESTAMP_NTZ NOT NULL,
+  CHANNEL      VARCHAR       NOT NULL,
+  STATUS       VARCHAR       NOT NULL,
+  AMOUNT       NUMBER(12, 2) NOT NULL,
+  ITEMS        VARIANT,
+  CONSTRAINT PK_ORDERS PRIMARY KEY (ORDER_ID)
+);
+```
+
+<div class="callout">
+Snowflake 标准表上的主键、外键通常是信息性约束，而不是自动强制唯一/参照完整性。数据质量仍需在加载与测试流程中保证。约束语义也可能因表类型不同而不同。
+</div>
+
+## 第 3 步：插入练习数据
+
+```sql
+INSERT INTO CUSTOMERS
+  (CUSTOMER_ID, CUSTOMER_NAME, SIGNUP_DATE, REGION, SEGMENT)
+VALUES
+  (1, '林晨', '2025-01-05', '西部', '消费者'),
+  (2, '王悦', '2025-01-18', '东部', '企业'),
+  (3, '赵敏', '2025-02-02', '中部', '消费者'),
+  (4, '陈杰', '2025-02-14', '西部', '小型企业'),
+  (5, '周宁', '2025-03-01', '东部', '消费者'),
+  (6, 'Alex Li', '2025-03-20', '北部', '企业');
+
+INSERT INTO ORDERS
+  (ORDER_ID, CUSTOMER_ID, ORDER_TS, CHANNEL, STATUS, AMOUNT, ITEMS)
+SELECT
+  column1::NUMBER,
+  column2::NUMBER,
+  TO_TIMESTAMP_NTZ(column3),
+  column4::VARCHAR,
+  column5::VARCHAR,
+  column6::NUMBER(12, 2),
+  PARSE_JSON(column7)
+FROM VALUES
+  (1001, 1, '2025-01-08 09:15:00', 'Web',   'COMPLETED', 120.00,
+   '[{"sku":"A100","category":"办公","qty":2,"price":40},{"sku":"B200","category":"配件","qty":1,"price":40}]'),
+  (1002, 2, '2025-01-21 14:10:00', 'Sales', 'COMPLETED', 860.00,
+   '[{"sku":"C300","category":"设备","qty":1,"price":800},{"sku":"B200","category":"配件","qty":2,"price":30}]'),
+  (1003, 1, '2025-02-03 11:30:00', 'App',   'RETURNED',   75.00,
+   '[{"sku":"D400","category":"家居","qty":1,"price":75}]'),
+  (1004, 3, '2025-02-10 16:45:00', 'Web',   'COMPLETED', 210.00,
+   '[{"sku":"A100","category":"办公","qty":3,"price":40},{"sku":"E500","category":"耗材","qty":3,"price":30}]'),
+  (1005, 4, '2025-02-18 10:05:00', 'Sales', 'CANCELLED', 420.00,
+   '[{"sku":"F600","category":"家具","qty":1,"price":420}]'),
+  (1006, 2, '2025-03-02 13:20:00', 'Web',   'COMPLETED', 330.00,
+   '[{"sku":"E500","category":"耗材","qty":6,"price":30},{"sku":"B200","category":"配件","qty":5,"price":30}]'),
+  (1007, 5, '2025-03-07 08:55:00', 'App',   'COMPLETED',  98.00,
+   '[{"sku":"G700","category":"生活","qty":2,"price":49}]'),
+  (1008, 3, '2025-03-15 12:00:00', 'Web',   'COMPLETED', 510.00,
+   '[{"sku":"C300","category":"设备","qty":1,"price":450},{"sku":"B200","category":"配件","qty":2,"price":30}]'),
+  (1009, 6, '2025-03-25 17:40:00', 'Sales', 'COMPLETED', 1250.00,
+   '[{"sku":"C300","category":"设备","qty":2,"price":600},{"sku":"E500","category":"耗材","qty":1,"price":50}]'),
+  (1010, 1, '2025-04-01 09:05:00', 'App',   'COMPLETED',  60.00,
+   '[{"sku":"E500","category":"耗材","qty":2,"price":30}]'),
+  (1011, 5, '2025-04-08 15:25:00', 'Web',   'RETURNED',  180.00,
+   '[{"sku":"A100","category":"办公","qty":2,"price":40},{"sku":"D400","category":"家居","qty":1,"price":100}]'),
+  (1012, 4, '2025-04-17 10:50:00', 'Sales', 'COMPLETED', 690.00,
+   '[{"sku":"F600","category":"家具","qty":1,"price":600},{"sku":"B200","category":"配件","qty":3,"price":30}]'),
+  (1013, 2, '2025-05-04 18:10:00', 'App',   'COMPLETED', 240.00,
+   '[{"sku":"G700","category":"生活","qty":3,"price":50},{"sku":"E500","category":"耗材","qty":3,"price":30}]'),
+  (1014, 6, '2025-05-19 07:45:00', 'Web',   'COMPLETED', 320.00,
+   '[{"sku":"A100","category":"办公","qty":4,"price":40},{"sku":"D400","category":"家居","qty":2,"price":80}]'),
+  (1015, 3, '2025-06-02 11:15:00', 'Web',   'COMPLETED', 150.00,
+   '[{"sku":"E500","category":"耗材","qty":5,"price":30}]');
+```
+
+## 第 4 步：验证环境
+
+```sql
+SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_DATABASE(), CURRENT_SCHEMA();
+
+SELECT COUNT(*) AS CUSTOMER_ROWS FROM CUSTOMERS;  -- 预期 6
+SELECT COUNT(*) AS ORDER_ROWS FROM ORDERS;        -- 预期 15
+
+SELECT * FROM ORDERS ORDER BY ORDER_TS LIMIT 5;
+```
+
+# SQL 分析基础
+
+## 投影、过滤、排序与限制
+
+```sql
+SELECT
+  ORDER_ID,
+  ORDER_TS,
+  CHANNEL,
+  AMOUNT
+FROM ORDERS
+WHERE STATUS = 'COMPLETED'
+  AND ORDER_TS >= '2025-03-01'::TIMESTAMP_NTZ
+ORDER BY AMOUNT DESC
+LIMIT 5;
+```
+
+建议：
+
+- 分析查询明确选择需要的列，避免长期使用 `SELECT *`；
+- 时间列明确使用正确时区类型；本教程的 `TIMESTAMP_NTZ` 不携带时区；
+- 用半开区间过滤日期通常更稳健，例如 `>= '2025-03-01' AND < '2025-04-01'`；
+- 不要对过滤列随意包裹函数，否则可能降低裁剪效果。
+
+## 聚合与条件指标
+
+下面按月计算成交订单数、客户数、成交额与客单价：
+
+```sql
+SELECT
+  DATE_TRUNC('MONTH', ORDER_TS)::DATE AS ORDER_MONTH,
+  COUNT_IF(STATUS = 'COMPLETED') AS COMPLETED_ORDERS,
+  COUNT(DISTINCT IFF(STATUS = 'COMPLETED', CUSTOMER_ID, NULL))
+    AS ACTIVE_CUSTOMERS,
+  SUM(IFF(STATUS = 'COMPLETED', AMOUNT, 0)) AS REVENUE,
+  AVG(IFF(STATUS = 'COMPLETED', AMOUNT, NULL)) AS AVG_ORDER_VALUE
+FROM ORDERS
+GROUP BY DATE_TRUNC('MONTH', ORDER_TS)::DATE
+ORDER BY ORDER_MONTH;
+```
+
+注意 `SUM` 与 `AVG` 的空值处理不同：
+
+- `SUM(IFF(..., AMOUNT, 0))` 把不符合条件的记录贡献设为 0；
+- `AVG(IFF(..., AMOUNT, NULL))` 让不符合条件的记录不参与平均值；
+- 财务指标应明确退货、取消、税费、货币与时间边界的业务定义。
+
+## 连接与公用表表达式
+
+```sql
+WITH CUSTOMER_REVENUE AS (
+  SELECT
+    CUSTOMER_ID,
+    COUNT(*) AS COMPLETED_ORDERS,
+    SUM(AMOUNT) AS REVENUE
+  FROM ORDERS
+  WHERE STATUS = 'COMPLETED'
+  GROUP BY CUSTOMER_ID
+)
+SELECT
+  C.CUSTOMER_ID,
+  C.CUSTOMER_NAME,
+  C.REGION,
+  C.SEGMENT,
+  COALESCE(R.COMPLETED_ORDERS, 0) AS COMPLETED_ORDERS,
+  COALESCE(R.REVENUE, 0) AS REVENUE
+FROM CUSTOMERS AS C
+LEFT JOIN CUSTOMER_REVENUE AS R
+  ON C.CUSTOMER_ID = R.CUSTOMER_ID
+ORDER BY REVENUE DESC;
+```
+
+使用 `LEFT JOIN` 是为了保留没有成交订单的客户。连接前先问三个问题：
+
+1. 两侧连接键是否唯一？
+2. 预期结果是一对一、一对多还是多对多？
+3. 连接后行数异常增加是否意味着重复键？
+
+## 集合、空值与安全除法
+
+```sql
+SELECT
+  CHANNEL,
+  COUNT(*) AS ALL_ORDERS,
+  COUNT_IF(STATUS = 'RETURNED') AS RETURNED_ORDERS,
+  DIV0(COUNT_IF(STATUS = 'RETURNED'), COUNT(*)) AS RETURN_RATE
+FROM ORDERS
+GROUP BY CHANNEL
+ORDER BY RETURN_RATE DESC;
+```
+
+`DIV0` 在除数为 0 时返回 0；如果“无法计算”应该是未知而不是 0，可改用：
+
+```sql
+COUNT_IF(STATUS = 'RETURNED') / NULLIF(COUNT(*), 0)
+```
+
+# Snowflake 在数据分析上能做什么
+
+## 探索式分析与数据画像
+
+Snowflake 可直接用 SQL 做分布、缺失率、唯一值、分位数和异常检查。例如：
+
+```sql
+SELECT
+  COUNT(*) AS ROW_COUNT,
+  COUNT_IF(AMOUNT IS NULL) AS NULL_AMOUNT_ROWS,
+  COUNT(DISTINCT CUSTOMER_ID) AS DISTINCT_CUSTOMERS,
+  MIN(AMOUNT) AS MIN_AMOUNT,
+  MEDIAN(AMOUNT) AS MEDIAN_AMOUNT,
+  APPROX_PERCENTILE(AMOUNT, 0.9) AS P90_AMOUNT,
+  MAX(AMOUNT) AS MAX_AMOUNT
+FROM ORDERS;
+```
+
+大数据量下，`APPROX_COUNT_DISTINCT`、`APPROX_PERCENTILE` 等近似算法可换取更低的计算成本和更快的探索；正式财务报表则应评估是否需要精确算法。
+
+### 用一个查询生成分组画像
+
+```sql
+SELECT
+  C.REGION,
+  C.SEGMENT,
+  COUNT(DISTINCT O.CUSTOMER_ID) AS BUYERS,
+  COUNT_IF(O.STATUS = 'COMPLETED') AS ORDERS,
+  SUM(IFF(O.STATUS = 'COMPLETED', O.AMOUNT, 0)) AS REVENUE,
+  AVG(IFF(O.STATUS = 'COMPLETED', O.AMOUNT, NULL)) AS AOV
+FROM CUSTOMERS C
+LEFT JOIN ORDERS O
+  ON C.CUSTOMER_ID = O.CUSTOMER_ID
+GROUP BY C.REGION, C.SEGMENT
+ORDER BY REVENUE DESC;
+```
+
+## 窗口函数：不折叠明细的分析
+
+普通 `GROUP BY` 会把多行折叠为一行；窗口函数保留明细，同时计算排名、累计、移动平均、前后值等。
+
+### 每位客户最近一单：`ROW_NUMBER` + `QUALIFY`
+
+```sql
+SELECT
+  ORDER_ID,
+  CUSTOMER_ID,
+  ORDER_TS,
+  STATUS,
+  AMOUNT,
+  ROW_NUMBER() OVER (
+    PARTITION BY CUSTOMER_ID
+    ORDER BY ORDER_TS DESC, ORDER_ID DESC
+  ) AS RECENCY_RANK
+FROM ORDERS
+QUALIFY RECENCY_RANK = 1
+ORDER BY CUSTOMER_ID;
+```
+
+`QUALIFY` 类似窗口函数结果的 `WHERE`。它省去了再包一层子查询，是 Snowflake 分析 SQL 中非常实用的语法。
+
+### 月收入、环比和累计值
+
+```sql
+WITH MONTHLY AS (
+  SELECT
+    DATE_TRUNC('MONTH', ORDER_TS)::DATE AS MONTH,
+    SUM(AMOUNT) AS REVENUE
+  FROM ORDERS
+  WHERE STATUS = 'COMPLETED'
+  GROUP BY DATE_TRUNC('MONTH', ORDER_TS)::DATE
+),
+WITH_PREVIOUS AS (
+  SELECT
+    MONTH,
+    REVENUE,
+    LAG(REVENUE) OVER (ORDER BY MONTH) AS PREVIOUS_REVENUE,
+    SUM(REVENUE) OVER (
+      ORDER BY MONTH
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+    ) AS CUMULATIVE_REVENUE
+  FROM MONTHLY
+)
+SELECT
+  MONTH,
+  REVENUE,
+  PREVIOUS_REVENUE,
+  DIV0(REVENUE - PREVIOUS_REVENUE, PREVIOUS_REVENUE) AS MOM_GROWTH,
+  CUMULATIVE_REVENUE
+FROM WITH_PREVIOUS
+ORDER BY MONTH;
+```
+
+明确写 `ROWS BETWEEN ...` 可以避免默认窗口框架带来的歧义。
+
+### 移动平均
+
+```sql
+WITH MONTHLY AS (
+  SELECT
+    DATE_TRUNC('MONTH', ORDER_TS)::DATE AS MONTH,
+    SUM(AMOUNT) AS REVENUE
+  FROM ORDERS
+  WHERE STATUS = 'COMPLETED'
+  GROUP BY 1
+)
+SELECT
+  MONTH,
+  REVENUE,
+  AVG(REVENUE) OVER (
+    ORDER BY MONTH
+    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+  ) AS TRAILING_3_ROW_AVG
+FROM MONTHLY
+ORDER BY MONTH;
+```
+
+示例数据每个月都有记录，所以“三行”恰好近似“三个月”。真实数据若月份断档，应先生成完整日期脊柱（date spine）再连接，否则三行不一定等于三个月。
+
+## 漏斗、留存与队列分析
+
+Snowflake 适合把事件或订单整理成用户级、日期级特征。下面计算注册月到首个成交月的间隔：
+
+```sql
+WITH FIRST_PURCHASE AS (
+  SELECT
+    CUSTOMER_ID,
+    MIN(ORDER_TS::DATE) AS FIRST_PURCHASE_DATE
+  FROM ORDERS
+  WHERE STATUS = 'COMPLETED'
+  GROUP BY CUSTOMER_ID
+)
+SELECT
+  DATE_TRUNC('MONTH', C.SIGNUP_DATE)::DATE AS SIGNUP_COHORT,
+  COUNT(*) AS SIGNUPS,
+  COUNT(F.FIRST_PURCHASE_DATE) AS CONVERTED_CUSTOMERS,
+  AVG(DATEDIFF('DAY', C.SIGNUP_DATE, F.FIRST_PURCHASE_DATE))
+    AS AVG_DAYS_TO_FIRST_PURCHASE
+FROM CUSTOMERS C
+LEFT JOIN FIRST_PURCHASE F
+  ON C.CUSTOMER_ID = F.CUSTOMER_ID
+GROUP BY DATE_TRUNC('MONTH', C.SIGNUP_DATE)::DATE
+ORDER BY SIGNUP_COHORT;
+```
+
+正式留存分析还要明确：
+
+- “活跃”是登录、下单还是成交；
+- 观察窗口是否完整，是否存在右删失；
+- 时区和自然日如何定义；
+- 晚到事件和重复事件如何处理。
+
+## 半结构化数据：VARIANT、路径与 FLATTEN
+
+Snowflake 可以把 JSON、Avro、ORC、Parquet 等数据映射到 `VARIANT`、`OBJECT` 和 `ARRAY`，并用 SQL 查询。详见 [半结构化数据类型](https://docs.snowflake.com/en/sql-reference/data-types-semistructured)。
+
+### 访问 JSON 路径
+
+```sql
+SELECT
+  ORDER_ID,
+  ITEMS[0]:sku::VARCHAR AS FIRST_SKU,
+  ITEMS[0]:category::VARCHAR AS FIRST_CATEGORY,
+  ITEMS[0]:qty::NUMBER AS FIRST_ITEM_QTY
+FROM ORDERS
+ORDER BY ORDER_ID;
+```
+
+路径取出的值仍可能是 `VARIANT`，所以用 `::VARCHAR`、`::NUMBER` 明确转换类型。JSON 的 `null` 与 SQL `NULL` 语义不同，数据质量检查时要分别考虑。
+
+### 把数组展开成行
+
+`FLATTEN` 是表函数，可把 `VARIANT`、`OBJECT` 或 `ARRAY` 中的复合值展开。官方语义见 [FLATTEN 参考](https://docs.snowflake.com/en/sql-reference/functions/flatten)。
+
+```sql
+SELECT
+  O.ORDER_ID,
+  O.CUSTOMER_ID,
+  F.INDEX AS ITEM_INDEX,
+  F.VALUE:sku::VARCHAR AS SKU,
+  F.VALUE:category::VARCHAR AS CATEGORY,
+  F.VALUE:qty::NUMBER AS QTY,
+  F.VALUE:price::NUMBER(12, 2) AS UNIT_PRICE,
+  F.VALUE:qty::NUMBER * F.VALUE:price::NUMBER(12, 2) AS LINE_AMOUNT
+FROM ORDERS O,
+LATERAL FLATTEN(INPUT => O.ITEMS) F
+WHERE O.STATUS = 'COMPLETED'
+ORDER BY O.ORDER_ID, F.INDEX;
+```
+
+### 从 JSON 明细计算品类收入
+
+```sql
+WITH LINES AS (
+  SELECT
+    F.VALUE:category::VARCHAR AS CATEGORY,
+    F.VALUE:qty::NUMBER AS QTY,
+    F.VALUE:price::NUMBER(12, 2) AS UNIT_PRICE
+  FROM ORDERS O,
+  LATERAL FLATTEN(INPUT => O.ITEMS) F
+  WHERE O.STATUS = 'COMPLETED'
+)
+SELECT
+  CATEGORY,
+  SUM(QTY) AS UNITS,
+  SUM(QTY * UNIT_PRICE) AS LINE_REVENUE
+FROM LINES
+GROUP BY CATEGORY
+ORDER BY LINE_REVENUE DESC;
+```
+
+<div class="callout">
+VARIANT 适合快速接入演化中的数据。若某些字段被频繁过滤、连接，或其日期/数字以字符串保存，通常值得抽取成强类型关系列，并以真实查询验证存储和性能收益。
+</div>
+
+## 时间序列与日期处理
+
+```sql
+SELECT
+  DATE_TRUNC('WEEK', ORDER_TS)::DATE AS WEEK_START,
+  CHANNEL,
+  COUNT_IF(STATUS = 'COMPLETED') AS ORDERS,
+  SUM(IFF(STATUS = 'COMPLETED', AMOUNT, 0)) AS REVENUE
+FROM ORDERS
+GROUP BY DATE_TRUNC('WEEK', ORDER_TS)::DATE, CHANNEL
+ORDER BY WEEK_START, CHANNEL;
+```
+
+实践中需要统一：
+
+- 业务时区与账户/会话时区；
+- 周从哪一天开始；
+- `TIMESTAMP_NTZ`、`TIMESTAMP_LTZ`、`TIMESTAMP_TZ` 的选择；
+- 夏令时边界；
+- 财务期间与自然月是否一致。
+
+## Time Travel：查询和恢复历史状态
+
+Time Travel 在保留期内支持查询历史数据、克隆历史对象和恢复被删除对象。标准保留期通常为 1 天；永久对象在 Enterprise Edition 及以上可配置更长保留期，最高可达 90 天。实际能力受版本、对象类型和 `DATA_RETENTION_TIME_IN_DAYS` 影响，详见 [Time Travel 官方说明](https://docs.snowflake.com/en/user-guide/data-time-travel)。
+
+### 可控演示：查看更新前的数据
+
+以下语句会修改练习表；先读完整段落再执行。
+
+```sql
+UPDATE ORDERS
+SET AMOUNT = AMOUNT + 10
+WHERE ORDER_ID = 1001;
+
+SET UPDATE_QUERY_ID = LAST_QUERY_ID();
+
+-- 查看该 UPDATE 语句执行前的行
+SELECT ORDER_ID, AMOUNT
+FROM ORDERS BEFORE (STATEMENT => $UPDATE_QUERY_ID)
+WHERE ORDER_ID = 1001;
+
+-- 查看当前值
+SELECT ORDER_ID, AMOUNT
+FROM ORDERS
+WHERE ORDER_ID = 1001;
+
+-- 恢复本教程原始值
+UPDATE ORDERS
+SET AMOUNT = 120.00
+WHERE ORDER_ID = 1001;
+```
+
+也可以按时间偏移查询，但偏移必须落在数据存在且仍在保留期的时点：
+
+```sql
+-- 情景示例：查询 5 分钟前的状态
+SELECT *
+FROM ORDERS AT (OFFSET => -60 * 5);
+```
+
+Time Travel 不是备份策略的完整替代品。延长保留期会增加历史数据存储，且临时表、瞬态表、永久表的 Time Travel 和 Fail-safe 行为不同。
+
+## 零复制克隆：快速建立隔离沙箱
+
+克隆数据库、模式或表时，初始克隆主要共享现有微分区，不立即复制整份数据；源或克隆后续变化才形成各自的新微分区。
+
+```sql
+CREATE OR REPLACE TABLE ORDERS_EXPERIMENT CLONE ORDERS;
+
+UPDATE ORDERS_EXPERIMENT
+SET AMOUNT = AMOUNT * 0.9
+WHERE STATUS = 'COMPLETED';
+
+SELECT
+  (SELECT SUM(AMOUNT) FROM ORDERS
+    WHERE STATUS = 'COMPLETED') AS SOURCE_REVENUE,
+  (SELECT SUM(AMOUNT) FROM ORDERS_EXPERIMENT
+    WHERE STATUS = 'COMPLETED') AS EXPERIMENT_REVENUE;
+
+DROP TABLE ORDERS_EXPERIMENT;
+```
+
+克隆特别适合测试、开发和可重复实验，但不是“永远免费”：
+
+- 发生修改后，新微分区会占用存储；
+- 源表删除的微分区若仍被克隆引用，相关存储仍需保留；
+- 克隆对象的权限继承规则需单独审查；
+- 克隆生产数据前仍要遵守敏感数据政策。
+
+## 安全数据共享
+
+Secure Data Sharing 可以把选定对象以只读方式提供给另一个 Snowflake 账户，而不在双方账户间复制实际数据。消费者通常为查询共享数据所用的计算付费；跨区域/跨云的 listing 与自动履行还可能涉及复制、存储或传输成本。参见 [安全数据共享概览](https://docs.snowflake.com/en/user-guide/data-sharing-intro)。
+
+以下为 **提供方管理员情景示例**：
+
+```sql
+-- 需要 ACCOUNTADMIN 或经授权的角色；账户标识必须替换
+CREATE SHARE IF NOT EXISTS SALES_SHARE;
+
+GRANT USAGE ON DATABASE SF_LEARNING_DB TO SHARE SALES_SHARE;
+GRANT USAGE ON SCHEMA SF_LEARNING_DB.ANALYTICS TO SHARE SALES_SHARE;
+GRANT SELECT ON TABLE SF_LEARNING_DB.ANALYTICS.ORDERS
+  TO SHARE SALES_SHARE;
+
+ALTER SHARE SALES_SHARE
+  ADD ACCOUNTS = <ORGANIZATION_NAME>.<CONSUMER_ACCOUNT_NAME>;
+```
+
+生产共享更常通过数据库角色、secure view、listing 和治理策略控制暴露范围。共享前要审查行级/列级敏感信息、派生字段泄露和消费者权限。
+
+## Snowsight：从 Workspace 到仪表板
+
+Snowsight 是 Snowflake 的 Web 界面，可用于：
+
+- 在 Workspaces 中用 SQL、Python、Markdown 和文件夹组织分析项目；
+- 浏览数据库对象和数据；
+- 查看 Query History 与 Query Profile；
+- 把查询结果画成图表并组成 dashboard；
+- 管理用户、角色、仓库、加载、任务和成本（取决于权限）；
+- 使用 Notebooks 将 SQL、Python 和 Markdown 放在同一分析叙事中。
+
+<div class="callout warning">
+旧版 Legacy Worksheets 和 Legacy Dashboards 已于 2026-06-22 移除。当前 SQL 编辑体验以 Workspaces 为主；本节的 “dashboard” 指当前 Snowsight Dashboards。遇到仍要求打开 Legacy Worksheet 的旧教程时，应改用 Workspace 中的 SQL 文件。
+</div>
+
+一个实用的仪表板工作流：
+
+1. 先在 Workspace 的 SQL 文件中写出可复现的指标 SQL；
+2. 固定业务定义、角色和仓库；
+3. 根据结果选择折线图、柱图或表格；
+4. 加入日期、地区等过滤器；
+5. 分享前用目标用户角色验证权限；
+6. 记录刷新频率、计算成本与数据延迟。
+
+官方说明见 [Snowsight Workspaces](https://docs.snowflake.com/en/user-guide/ui-snowsight/workspaces) 与 [Snowsight 仪表板](https://docs.snowflake.com/en/user-guide/ui-snowsight-dashboards)。
+
+## BI 工具衔接
+
+Tableau、Power BI、Looker 等 BI 工具通常通过原生连接器、JDBC 或 ODBC 连接 Snowflake。设计时建议：
+
+- 为 BI 工作负载单独配置仓库，避免与大批量 ELT 互相排队；
+- 用只读自定义角色授予数据集市访问；
+- 优先暴露稳定的视图、semantic view 或数据集市，而不是原始表；
+- 配置 SSO/MFA 或合适的程序化认证，不在报表文件中硬编码密码；
+- 设置查询标签，把成本追溯到报表、团队或项目；
+- 评估 Import/Extract 与 DirectQuery/Live 模式在新鲜度、并发和成本上的取舍；
+- 对高并发仪表板观察队列时间、缓存命中和重复查询。
+
+## Snowpark、ML 与 AI 衔接
+
+Snowflake 的分析并不限于 SQL：
+
+- **Snowpark DataFrame API**：用 Python、Java 或 Scala 构建在 Snowflake 执行的转换；
+- **Snowpark ML**：特征处理、训练、模型注册、推理与监控相关能力；
+- **Feature Store / Model Registry**：管理可复用特征和模型生命周期；
+- **Notebooks**：在靠近数据的位置组合 SQL、Python、图表和说明；
+- **Cortex 能力**：使用 Snowflake 管理的 AI/LLM 功能；可用性与费用需按账户核对；
+- **外部生态**：通过连接器把结果提供给 R、Python、BI、编排和 dbt 等工具。
+
+以下 Python 片段是 **情景示例**，需安装兼容的 Snowpark Python 包并配置会话：
+
+```python
+from snowflake.snowpark import Session
+from snowflake.snowpark.functions import col, sum as sf_sum
+
+# 不要把真实凭据提交到源码；优先使用环境变量、SSO 或密钥认证。
+session = Session.builder.configs(connection_parameters).create()
+
+orders = session.table("SF_LEARNING_DB.ANALYTICS.ORDERS")
+revenue_by_channel = (
+    orders
+    .filter(col("STATUS") == "COMPLETED")
+    .group_by(col("CHANNEL"))
+    .agg(sf_sum(col("AMOUNT")).alias("REVENUE"))
+)
+
+revenue_by_channel.show()
+```
+
+关键原则是尽量把过滤、连接与聚合下推到 Snowflake，而不是先把整表拉到本地内存。
+
+# 数据进入与持续转换
+
+## 批量加载：Stage、File Format 与 COPY
+
+Snowflake 的批量加载通常包含：
+
+1. 文件位于内部或外部 stage；
+2. file format 描述 CSV、JSON、Parquet 等解析规则；
+3. `COPY INTO <table>` 把数据载入表；
+4. 加载历史用于避免重复加载和排查错误。
+
+以下为 **情景示例**，需要你先把 CSV 上传到内部 stage：
+
+```sql
+CREATE OR REPLACE FILE FORMAT CSV_FORMAT
+  TYPE = CSV
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  SKIP_HEADER = 1
+  NULL_IF = ('', 'NULL');
+
+CREATE OR REPLACE STAGE LEARNING_STAGE
+  FILE_FORMAT = CSV_FORMAT;
+
+-- 在 Snowsight 或 Snowflake CLI 中把文件上传到 @LEARNING_STAGE 后：
+COPY INTO CUSTOMERS
+FROM @LEARNING_STAGE/customers.csv
+FILE_FORMAT = (FORMAT_NAME = 'CSV_FORMAT')
+ON_ERROR = 'ABORT_STATEMENT';
+```
+
+生产加载前可先验证：
+
+```sql
+COPY INTO CUSTOMERS
+FROM @LEARNING_STAGE/customers.csv
+FILE_FORMAT = (FORMAT_NAME = 'CSV_FORMAT')
+VALIDATION_MODE = 'RETURN_ERRORS';
+```
+
+## 增量与自动化能力
+
+| 能力 | 适用场景 | 需要关注 |
+|---|---|---|
+| Snowpipe | 文件到达后的持续加载 | 服务计费、事件配置、重复与延迟 |
+| Snowpipe Streaming | 低延迟行式/流式摄取 | SDK/连接器、通道状态和成本 |
+| Stream | 跟踪表变化以支持增量处理 | offset、staleness、消费语义 |
+| Task | 按计划或依赖图运行 SQL/过程 | 仓库或 serverless task 成本、失败重试 |
+| Dynamic Table | 按目标新鲜度声明式维护结果 | target lag、刷新模式和刷新成本 |
+
+选择工具前先问：需要多新鲜、数据量多大、是否允许重算、失败如何恢复、由谁监控。
+
+# 性能诊断与优化
+
+## 一条可靠的诊断顺序
+
+1. **确认问题**：是执行慢、排队久、编译慢，还是结果传输慢？
+2. **保存 Query ID**：用 Query History 打开具体查询。
+3. **查看 Query Profile**：找最昂贵节点、扫描量、裁剪比例、数据倾斜、落盘、行数爆炸。
+4. **检查 SQL 与数据模型**：过滤、连接基数、重复计算、`SELECT *`、不必要排序。
+5. **检查仓库**：大小、并发队列、负载隔离、自动暂停和缓存。
+6. **最后评估专项能力**：聚类、Search Optimization、物化视图、Query Acceleration 等。
+7. **用同等条件复测**：区分冷缓存/热缓存，比较耗时、扫描量和信用消耗。
+
+## 常见症状与对应行动
+
+| 症状 | 先检查 | 可能行动 |
+|---|---|---|
+| 扫描远多于预期 | 过滤是否选择性、微分区裁剪 | 改写过滤；评估聚类 |
+| 连接后行数暴增 | 连接键重复、多对多 | 先聚合/去重，修正数据模型 |
+| 大量本地/远程落盘 | 内存压力、排序、窗口、连接 | 改 SQL 或短时放大仓库 |
+| 查询大量排队 | 并发和仓库负载 | 隔离工作负载或多集群 |
+| 第二次很快、第一次很慢 | 结果/数据缓存 | 用符合 SLA 的冷启动场景测试 |
+| 小查询频繁启动仓库 | auto-suspend 太激进 | 按到达间隔调整 |
+
+## Query History：最近的慢查询
+
+下面需要访问 `SNOWFLAKE.ACCOUNT_USAGE` 的权限，且视图可能存在数据延迟：
+
+```sql
+SELECT
+  QUERY_ID,
+  USER_NAME,
+  WAREHOUSE_NAME,
+  TOTAL_ELAPSED_TIME / 1000 AS ELAPSED_SECONDS,
+  BYTES_SCANNED,
+  ROWS_PRODUCED,
+  QUERY_TEXT
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE START_TIME >= DATEADD('DAY', -7, CURRENT_TIMESTAMP())
+  AND EXECUTION_STATUS = 'SUCCESS'
+ORDER BY TOTAL_ELAPSED_TIME DESC
+LIMIT 20;
+```
+
+Snowsight 的 Query Profile 能进一步显示执行计划节点与统计信息，参见 [Query History 与 Query Profile](https://docs.snowflake.com/en/user-guide/ui-snowsight-activity)。
+
+## 不要过早使用“高级优化”
+
+- **Clustering key**：可能改善大表上稳定、选择性强的过滤，但自动聚类会产生服务成本；
+- **Search Optimization Service**：适合特定点查、子串、半结构化等访问模式，需额外存储和维护成本；
+- **Materialized view**：可预计算稳定模式，但受支持范围、维护与存储成本约束；
+- **更大仓库**：可能缩短执行时间，但不修复错误连接或无效扫描；
+- **多集群仓库**：主要缓解并发，不一定让一条查询更快。
+
+先用代表性数据和查询做小规模基准，并比较“每次查询成本”与 SLA。
+
+# 安全与治理基础
+
+## RBAC：把权限授予角色
+
+Snowflake 以角色为权限管理核心：权限授给角色，角色再授给用户或更高层角色。官方说明见 [访问控制概览](https://docs.snowflake.com/en/user-guide/security-access-control-overview)。
+
+一个简化层级：
+
+```
+SYSADMIN
+└── ANALYTICS_ADMIN
+    └── ANALYST
+        └── 用户
+```
+
+生产环境应按职能设计自定义角色，而不是让分析师日常使用 `ACCOUNTADMIN`。
+
+### 最小权限示例
+
+以下为 **管理员示例**：
+
+```sql
+USE ROLE SECURITYADMIN;
+
+CREATE ROLE IF NOT EXISTS LEARNING_ANALYST;
+
+GRANT USAGE ON WAREHOUSE LEARN_WH TO ROLE LEARNING_ANALYST;
+GRANT USAGE ON DATABASE SF_LEARNING_DB TO ROLE LEARNING_ANALYST;
+GRANT USAGE ON SCHEMA SF_LEARNING_DB.ANALYTICS TO ROLE LEARNING_ANALYST;
+GRANT SELECT ON ALL TABLES IN SCHEMA SF_LEARNING_DB.ANALYTICS
+  TO ROLE LEARNING_ANALYST;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA SF_LEARNING_DB.ANALYTICS
+  TO ROLE LEARNING_ANALYST;
+
+-- 把自定义角色接入角色层级
+GRANT ROLE LEARNING_ANALYST TO ROLE SYSADMIN;
+
+-- 替换为真实用户；执行前复核
+-- GRANT ROLE LEARNING_ANALYST TO USER <USER_NAME>;
+```
+
+为什么 `SELECT` 之外还需要 `USAGE`？访问表必须能“穿过”数据库和模式，并使用计算仓库。
+
+## 身份与认证
+
+生产基线通常包括：
+
+- 人员账户启用 MFA，并优先接入企业 SSO；
+- 程序化访问使用密钥对、OAuth 或工作负载身份等合适机制；
+- 不共享用户，不把密码/私钥写入 SQL、Rmd、Git 或 BI 文件；
+- 设定网络策略和会话策略（按组织需要）；
+- 定期清理休眠用户、过期密钥和过宽角色；
+- 紧急管理员角色与日常角色分离。
+
+## 数据保护与治理
+
+| 需求 | 常用能力 |
+|---|---|
+| 隐藏敏感列 | Masking policy |
+| 按用户/角色限制行 | Row access policy |
+| 标识敏感数据与归属 | Tags、分类与目录能力 |
+| 对外提供受控逻辑 | Secure view |
+| 集中授权 | Managed access schema |
+| 审计访问 | ACCESS_HISTORY、LOGIN_HISTORY、QUERY_HISTORY 等 |
+
+策略必须在目标角色下测试。一个查询“能运行”不等于数据暴露范围合理；视图、UDF、共享和导出都需要威胁建模。
+
+# 成本基础与 FinOps
+
+## 成本来自哪里
+
+Snowflake 总体成本通常包括：
+
+1. **计算**：用户管理的虚拟仓库、serverless 特性、云服务层和其他计算资源；
+2. **存储**：活动表数据、stage 文件、Time Travel、Fail-safe，以及被克隆继续引用的数据；
+3. **数据传输**：跨区域、跨云或向外传输等场景；
+4. **特定功能**：部分 AI/ML、搜索、自动聚类、复制等按各自规则计量。
+
+概览参见 [Snowflake 成本与计费](https://docs.snowflake.com/en/guides-overview-cost) 和 [存储成本说明](https://docs.snowflake.com/en/user-guide/cost-understanding-data-storage)。
+
+## 学习阶段最有效的十项控制
+
+1. 从 X-Small 开始，基于实测再调整；
+2. 打开自动暂停与自动恢复；
+3. 为 BI、ELT、临时探索分仓库，便于隔离和归因；
+4. 避免在没人使用时让仓库常开；
+5. 给查询设置 `QUERY_TAG`；
+6. 用 Resource Monitor 控制用户管理仓库；
+7. 用 Budgets/成本管理能力覆盖和观察更广的服务；
+8. 定期查仓库与 serverless 使用；
+9. 控制 Time Travel 保留期、stage 文件和克隆生命周期；
+10. 关注每个业务结果的单位成本，而不仅是单条查询时间。
+
+### 查询标签
+
+```sql
+ALTER SESSION SET QUERY_TAG = 'team=analytics;project=snowflake_intro';
+
+SELECT COUNT(*) FROM ORDERS;
+```
+
+规范化标签可以把查询和成本归因到团队、产品、环境或仪表板。
+
+### Resource Monitor
+
+以下为 **账户管理员示例**。Resource Monitor 主要监控用户管理的虚拟仓库；它不能替代对所有 serverless 功能的成本管理。
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE RESOURCE MONITOR LEARNING_MONITOR
+  WITH CREDIT_QUOTA = 10
+  FREQUENCY = MONTHLY
+  START_TIMESTAMP = IMMEDIATELY
+  TRIGGERS
+    ON 50 PERCENT DO NOTIFY
+    ON 80 PERCENT DO NOTIFY
+    ON 100 PERCENT DO SUSPEND;
+
+ALTER WAREHOUSE LEARN_WH
+  SET RESOURCE_MONITOR = LEARNING_MONITOR;
+```
+
+`SUSPEND` 通常允许已运行查询完成，`SUSPEND_IMMEDIATE` 更强硬。生产阈值与动作应由负责人根据业务连续性决定。
+
+### 仓库信用使用
+
+```sql
+SELECT
+  WAREHOUSE_NAME,
+  DATE_TRUNC('DAY', START_TIME) AS USAGE_DAY,
+  SUM(CREDITS_USED) AS CREDITS_USED
+FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
+WHERE START_TIME >= DATEADD('DAY', -30, CURRENT_TIMESTAMP())
+GROUP BY WAREHOUSE_NAME, DATE_TRUNC('DAY', START_TIME)
+ORDER BY USAGE_DAY DESC, CREDITS_USED DESC;
+```
+
+对账时注意：
+
+- `ACCOUNT_USAGE` 等视图可能有延迟；
+- 信用量乘合同单价才是货币成本；
+- 云服务每日计费调整、serverless 和跨区域费用需使用对应视图；
+- 标签、资源名称和团队映射要保持一致。
+
+# 从分析到生产：一个参考分层
+
+| 层 | 示例对象 | 目的 |
+|---|---|---|
+| RAW | 原样落地表、VARIANT | 保留来源、便于重放 |
+| STAGING | 清洗、去重、类型转换视图/表 | 统一技术语义 |
+| CORE | 客户、订单等一致实体 | 建立复用业务模型 |
+| MART | 销售、运营、财务数据集市 | 面向分析主题与性能 |
+| SEMANTIC / SERVING | 指标、语义视图、API/共享 | 提供稳定消费接口 |
+
+每层都应有：
+
+- 数据所有者和 SLA；
+- 主键/唯一性/空值/范围测试；
+- 加载时间和数据新鲜度；
+- 敏感数据分类与权限；
+- 失败重跑、回滚与审计策略；
+- 成本归属。
+
+# 综合练习
+
+所有练习都基于 `SF_LEARNING_DB.ANALYTICS` 的示例数据。
+
+## 练习 1：渠道质量
+
+计算每个渠道的总订单、成交订单、退货订单、成交额和退货率，并按成交额降序。
+
+<details>
+<summary>查看参考答案</summary>
+
+```sql
+SELECT
+  CHANNEL,
+  COUNT(*) AS ALL_ORDERS,
+  COUNT_IF(STATUS = 'COMPLETED') AS COMPLETED_ORDERS,
+  COUNT_IF(STATUS = 'RETURNED') AS RETURNED_ORDERS,
+  SUM(IFF(STATUS = 'COMPLETED', AMOUNT, 0)) AS REVENUE,
+  DIV0(COUNT_IF(STATUS = 'RETURNED'), COUNT(*)) AS RETURN_RATE
+FROM ORDERS
+GROUP BY CHANNEL
+ORDER BY REVENUE DESC;
+```
+
+</details>
+
+## 练习 2：客户第二次成交
+
+找出每位客户的第二笔成交订单；没有第二笔成交的客户不返回。
+
+<details>
+<summary>查看参考答案</summary>
+
+```sql
+SELECT
+  CUSTOMER_ID,
+  ORDER_ID,
+  ORDER_TS,
+  AMOUNT,
+  ROW_NUMBER() OVER (
+    PARTITION BY CUSTOMER_ID
+    ORDER BY ORDER_TS, ORDER_ID
+  ) AS PURCHASE_NUMBER
+FROM ORDERS
+WHERE STATUS = 'COMPLETED'
+QUALIFY PURCHASE_NUMBER = 2
+ORDER BY CUSTOMER_ID;
+```
+
+</details>
+
+## 练习 3：品类销量冠军
+
+展开 `ITEMS`，计算每个品类的销量，然后返回销量最高的品类；并列时全部保留。
+
+<details>
+<summary>查看参考答案</summary>
+
+```sql
+WITH CATEGORY_UNITS AS (
+  SELECT
+    F.VALUE:category::VARCHAR AS CATEGORY,
+    SUM(F.VALUE:qty::NUMBER) AS UNITS
+  FROM ORDERS O,
+  LATERAL FLATTEN(INPUT => O.ITEMS) F
+  WHERE O.STATUS = 'COMPLETED'
+  GROUP BY F.VALUE:category::VARCHAR
+)
+SELECT
+  CATEGORY,
+  UNITS,
+  DENSE_RANK() OVER (ORDER BY UNITS DESC) AS SALES_RANK
+FROM CATEGORY_UNITS
+QUALIFY SALES_RANK = 1;
+```
+
+</details>
+
+## 练习 4：客户价值分层
+
+按每位客户的成交额计算 `NTILE(3)`，分成高、中、低三档。思考：客户很少时，`NTILE` 是否稳定？
+
+<details>
+<summary>查看参考答案</summary>
+
+```sql
+WITH CUSTOMER_VALUE AS (
+  SELECT
+    C.CUSTOMER_ID,
+    C.CUSTOMER_NAME,
+    COALESCE(SUM(IFF(O.STATUS = 'COMPLETED', O.AMOUNT, 0)), 0) AS REVENUE
+  FROM CUSTOMERS C
+  LEFT JOIN ORDERS O
+    ON C.CUSTOMER_ID = O.CUSTOMER_ID
+  GROUP BY C.CUSTOMER_ID, C.CUSTOMER_NAME
+),
+SCORED AS (
+  SELECT
+    *,
+    NTILE(3) OVER (ORDER BY REVENUE DESC) AS VALUE_TILE
+  FROM CUSTOMER_VALUE
+)
+SELECT
+  CUSTOMER_ID,
+  CUSTOMER_NAME,
+  REVENUE,
+  CASE VALUE_TILE
+    WHEN 1 THEN '高'
+    WHEN 2 THEN '中'
+    ELSE '低'
+  END AS VALUE_TIER
+FROM SCORED
+ORDER BY REVENUE DESC;
+```
+
+样本很小时，分位分组容易随新增记录波动。生产分层更适合使用经业务确认的绝对阈值，或在足够大、稳定的总体上计算。
+
+</details>
+
+## 练习 5：诊断而非盲目扩容
+
+假设一个报表突然变慢，请写下你会收集的五项证据。
+
+<details>
+<summary>查看建议答案</summary>
+
+可以包括：Query ID；总耗时与队列时间；扫描字节和裁剪比例；Query Profile 中最昂贵节点；连接前后行数；本地/远程落盘；仓库大小与并发；是否命中缓存；数据量是否突增；近期 SQL/表结构/聚类变化。先区分瓶颈，再决定改 SQL、改模型、隔离并发或调整计算。
+
+</details>
+
+# 最佳实践清单
+
+## 分析 SQL
+
+<ul class="checklist">
+  <li>指标先写业务定义，再写 SQL。</li>
+  <li>显式选择列、时间范围、状态和货币口径。</li>
+  <li>连接前验证键的唯一性和预期基数。</li>
+  <li>窗口函数明确 `PARTITION BY`、`ORDER BY` 和窗口框架。</li>
+  <li>使用 `QUALIFY` 简化窗口结果过滤。</li>
+  <li>半结构化字段尽早转换成预期类型。</li>
+  <li>给生产查询加可追踪的 `QUERY_TAG`。</li>
+  <li>用测试覆盖唯一性、非空、参照关系和新鲜度。</li>
+</ul>
+
+## 性能与成本
+
+<ul class="checklist">
+  <li>从小仓库开始，用代表性负载测量。</li>
+  <li>按工作负载隔离仓库，并配置合理的自动暂停。</li>
+  <li>通过 Query Profile 找证据，不凭感觉优化。</li>
+  <li>区分单查询算力不足与并发排队。</li>
+  <li>记录冷/热缓存条件。</li>
+  <li>定期复查闲置仓库、stage 文件、克隆和保留期。</li>
+  <li>同时观察 warehouse、serverless、storage 和 transfer。</li>
+</ul>
+
+## 安全与治理
+
+<ul class="checklist">
+  <li>用户使用自定义最小权限角色，日常不使用 `ACCOUNTADMIN`。</li>
+  <li>人员使用 SSO/MFA，服务使用合适的非密码认证。</li>
+  <li>敏感列和行使用治理策略，并在消费者角色下测试。</li>
+  <li>共享、克隆和导出前审查数据暴露范围。</li>
+  <li>保留查询、登录、授权和数据访问审计。</li>
+  <li>对象命名、注释、标签、所有者和 SLA 标准化。</li>
+</ul>
+
+# 清理学习环境
+
+如果这些对象只用于本教程，可以在确认无其他人使用后清理。
+
+<div class="callout danger">
+以下是删除操作。先运行 `SHOW DATABASES LIKE 'SF_LEARNING_DB'` 和 `SHOW WAREHOUSES LIKE 'LEARN_WH'` 核对精确目标；不要在共享或生产环境中直接执行。
+</div>
+
+```sql
+USE ROLE SYSADMIN;
+
+DROP DATABASE IF EXISTS SF_LEARNING_DB;
+DROP WAREHOUSE IF EXISTS LEARN_WH;
+```
+
+角色和资源监控器由安全/账户管理员按需清理：
+
+```sql
+USE ROLE SECURITYADMIN;
+DROP ROLE IF EXISTS LEARNING_ANALYST;
+
+USE ROLE ACCOUNTADMIN;
+DROP RESOURCE MONITOR IF EXISTS LEARNING_MONITOR;
+```
+
+数据库处于 Time Travel 保留期时，`UNDROP DATABASE SF_LEARNING_DB` 可能恢复误删对象；这不应成为跳过删除确认的理由。
+
+# 术语表
+
+| 术语 | 简明解释 |
+|---|---|
+| Account | Snowflake 的管理、安全和计费边界之一，位于组织内 |
+| Organization | 管理一个或多个 Snowflake 账户的上层实体 |
+| Database | 包含模式的逻辑容器 |
+| Schema | 在数据库内组织表、视图、stage、任务等对象的命名空间 |
+| Table | 持久化数据的关系对象；可分永久、瞬态、临时等类型 |
+| View | 保存查询定义的逻辑对象，通常不单独复制底层数据 |
+| Virtual Warehouse | 执行查询、加载和 DML 的计算集群 |
+| Credit | Snowflake 计算资源消耗的计量单位；货币成本还取决于合同单价 |
+| Micro-partition | Snowflake 自动管理的列式存储单元 |
+| Pruning | 利用元数据跳过无关微分区，减少扫描 |
+| RBAC | 基于角色的访问控制：权限授予角色，角色授予用户/其他角色 |
+| Role | 权限集合与继承层级中的实体 |
+| Stage | 存放或指向待加载/待卸载文件的位置 |
+| File Format | 描述 CSV、JSON、Parquet 等文件解析规则的对象 |
+| COPY INTO | 在表与 stage 文件之间加载或卸载数据的命令族 |
+| VARIANT | 可保存标量、对象或数组等半结构化值的数据类型 |
+| FLATTEN | 把数组/对象等复合值展开为多行的表函数 |
+| Stream | 记录源对象变更位置，用于增量处理 |
+| Task | 按计划或依赖关系执行 SQL/过程的对象 |
+| Dynamic Table | 按目标新鲜度声明式维护查询结果的表 |
+| Time Travel | 在保留期内查询、克隆或恢复历史对象/数据 |
+| Fail-safe | Time Travel 之后由 Snowflake 用于灾难恢复的不可由用户直接查询阶段 |
+| Zero-copy Clone | 初始共享现有微分区、按后续变更增加存储的克隆 |
+| Secure Data Sharing | 不复制实际数据、向其他账户提供受控只读访问 |
+| Snowsight | Snowflake Web 用户界面 |
+| Query Profile | 展示查询执行计划、节点和运行统计的诊断界面 |
+| Snowpark | 用 DataFrame/编程语言在 Snowflake 上处理数据的开发框架 |
+| Snowflake ML | Snowflake 内的特征、训练、注册、推理和监控相关工具集 |
+| Query Tag | 附加在查询上的标签，用于追踪、审计和成本归因 |
+| Resource Monitor | 监控和控制用户管理虚拟仓库信用使用的对象 |
+
+# 决策速查表
+
+| 如果你要…… | 优先考虑…… | 避免立即…… |
+|---|---|---|
+| 临时探索一张大表 | 选择必要列、限制日期、检查 Profile | 直接放到最大仓库 |
+| 隔离 BI 与 ETL | 分配独立仓库 | 让所有任务共用一个仓库 |
+| 查询 JSON 数组 | VARIANT 路径 + LATERAL FLATTEN | 先把整表下载到本地解析 |
+| 找每组最新一条 | ROW_NUMBER + QUALIFY | 多层自连接 |
+| 做安全实验副本 | 零复制克隆 | 完整复制 TB 级数据 |
+| 恢复误更新 | Time Travel / clone 历史状态 | 覆盖当前表且不留验证副本 |
+| 跨账户提供实时只读数据 | Secure Data Sharing / listing | 定期导出多份文件 |
+| 控制仓库费用 | auto-suspend、monitor、usage views | 只看月底账单 |
+| 解决并发排队 | 工作负载隔离或多集群 | 只给单集群升规格 |
+| 解决单查询落盘 | 改 SQL/模型，或短时 scale up | 无证据地启用所有优化服务 |
+
+# 官方资料与继续学习
+
+以下链接均为 Snowflake 官方文档，适合继续核对账户版本和最新语法：
+
+- [Snowflake 关键概念与架构](https://docs.snowflake.com/en/user-guide/intro-key-concepts)
+- [虚拟仓库概览](https://docs.snowflake.com/en/user-guide/warehouses-overview)
+- [Snowsight 快速导览](https://docs.snowflake.com/en/user-guide/ui-snowsight-quick-tour)
+- [半结构化数据查询](https://docs.snowflake.com/en/user-guide/querying-semistructured)
+- [Time Travel](https://docs.snowflake.com/en/user-guide/data-time-travel)
+- [零复制克隆语法](https://docs.snowflake.com/en/sql-reference/sql/create-clone)
+- [安全数据共享](https://docs.snowflake.com/en/user-guide/data-sharing-intro)
+- [访问控制](https://docs.snowflake.com/en/user-guide/security-access-control-overview)
+- [查询历史与 Query Profile](https://docs.snowflake.com/en/user-guide/ui-snowsight-activity)
+- [成本与计费](https://docs.snowflake.com/en/guides-overview-cost)
+- [Snowflake Feature Store](https://docs.snowflake.com/en/developer-guide/snowflake-ml/feature-store/overview)
+
+<div class="callout success">
+建议的下一步：先完整执行“快速上手”和前三个练习；然后选择你自己的一个真实指标，把业务定义、SQL、权限、性能证据和单位成本一起记录下来。能稳定、可解释、可治理地交付指标，才算真正完成了 Snowflake 分析入门。
+</div>
+
+<div class="footer-note">
+The V Lab · Snowflake 学习模块。示例仅用于教学；生产实施前请结合账户版本、权限、成本与官方文档复核。
+</div>
