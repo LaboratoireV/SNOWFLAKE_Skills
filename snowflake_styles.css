@@ -34,9 +34,6 @@ body {
   line-height: 1.68;
 }
 
-html[lang^="zh"] body {
-  line-height: 1.78;
-}
 
 .main-container {
   max-width: 1160px;
