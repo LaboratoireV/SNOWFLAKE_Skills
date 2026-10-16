@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="A Snowflake learning hub from The V Lab: architecture, a safe lab setup, analytical SQL, window functions, semi-structured JSON, Time Travel, data sharing, performance and cost." name="description"/>
+<meta content="The V Lab" name="author"/>
+<meta content="#12383b" name="theme-color"/>
+<meta content="light" name="color-scheme"/>
+<link href="https://the-v-lab.github.io/SNOWFLAKE_Skills/" rel="canonical"/>
+<link href="hub.css" rel="stylesheet"/>
+<meta content="website" property="og:type"/>
+<meta content="The V Lab" property="og:site_name"/>
+<meta content="Snowflake Learning Hub | The V Lab" property="og:title"/>
+<meta content="A Snowflake learning hub from The V Lab: architecture, a safe lab setup, analytical SQL, window functions, semi-structured JSON, Time Travel, data sharing, performance and cost." property="og:description"/>
+<meta content="https://the-v-lab.github.io/SNOWFLAKE_Skills/" property="og:url"/>
+<meta content="https://the-v-lab.github.io/SNOWFLAKE_Skills/og.png" property="og:image"/>
+<meta content="1200" property="og:image:width"/>
+<meta content="630" property="og:image:height"/>
+<meta content="The V Lab Snowflake Learning Hub" property="og:image:alt"/>
+<meta content="summary_large_image" name="twitter:card"/>
+<meta content="Snowflake Learning Hub | The V Lab" name="twitter:title"/>
+<meta content="A Snowflake learning hub from The V Lab: architecture, a safe lab setup, analytical SQL, window functions, semi-structured JSON, Time Travel, data sharing, performance and cost." name="twitter:description"/>
+<meta content="https://the-v-lab.github.io/SNOWFLAKE_Skills/og.png" name="twitter:image"/>
+<title>Snowflake Learning Hub | The V Lab</title>
+</head>
+<body>
+<a class="skip-link" href="#main-content">Skip to learning content</a>
+<div class="header-wrap">
+<header class="site-header shell">
+<a aria-current="page" aria-label="The V Lab Snowflake Learning Hub home" class="brand" href="index.html">
+<span aria-hidden="true" class="brand-mark">V</span>
+<span>The V Lab</span>
+</a>
+<nav aria-label="Main navigation" class="main-nav">
+<a href="#learning-path">Learning path</a>
+<a href="#guides">Guide</a>
+<a href="#choose-a-track">Choose a path</a>
+<a href="#concepts">Key concepts</a>
+</nav>
+<a aria-label="View the SNOWFLAKE_Skills repository on GitHub" class="repo-link" href="https://github.com/The-V-Lab/SNOWFLAKE_Skills">GitHub <span aria-hidden="true">↗</span></a>
+</header>
+</div>
+<main id="main-content" tabindex="-1">
+<section aria-labelledby="page-title" class="hero shell">
+<div class="hero-copy-wrap">
+<p class="eyebrow">Cloud data warehouse guide</p>
+<h1 id="page-title">Analyze data where it lives.</h1>
+<p class="hero-copy">Learn Snowflake from the ground up: how storage, compute and cloud services fit together, how to set up a safe practice lab, and how to answer real analytical questions in SQL, from window functions and JSON to Time Travel and secure sharing.</p>
+<div aria-label="Start the guide" class="hero-actions">
+<a class="button button-primary" href="snowflake_guide_en.html">Read the guide <span aria-hidden="true" class="arrow">→</span></a>
+</div>
+<ul aria-label="Guide highlights" class="hero-notes">
+<li>Self-paced</li>
+<li>Runnable SQL</li>
+<li>Capstone project</li>
+</ul>
+</div>
+<aside aria-label="A Snowflake worksheet running an analytical query" class="document-preview">
+<div aria-hidden="true" class="preview-toolbar">
+<span></span><span></span><span></span>
+<strong>analysis.sql</strong>
+</div>
+<div class="preview-body">
+<p class="preview-label">ONE WAREHOUSE, ONE QUESTION</p>
+<pre aria-label="Example Snowflake SQL"><code><span class="code-muted">-- Monthly revenue with a running total</span>
+<span class="code-key">USE WAREHOUSE</span> lab_wh;
+
+<span class="code-key">SELECT</span> region,
+       <span class="code-key">DATE_TRUNC</span>(<span class="code-value">'month'</span>, order_date) <span class="code-key">AS</span> month,
+       <span class="code-key">SUM</span>(amount) <span class="code-key">AS</span> revenue,
+       <span class="code-key">SUM</span>(<span class="code-key">SUM</span>(amount)) <span class="code-key">OVER</span> (
+         <span class="code-key">PARTITION BY</span> region <span class="code-key">ORDER BY</span> month
+       ) <span class="code-key">AS</span> running_revenue
+<span class="code-key">FROM</span> lab_db.retail.orders
+<span class="code-key">GROUP BY</span> region, month;</code></pre>
+<ol aria-label="Workflow" class="render-route">
+<li><span>01</span><strong>Store</strong><small>Tables + JSON</small></li>
+<li><span>02</span><strong>Compute</strong><small>Virtual warehouse</small></li>
+<li><span>03</span><strong>Share</strong><small>Views + shares</small></li>
+</ol>
+</div>
+</aside>
+</section>
+<section aria-labelledby="path-title" class="section shell" id="learning-path">
+<div class="section-intro">
+<div>
+<p class="section-kicker">Learning path</p>
+<h2 id="path-title">From first warehouse to analytical workflow.</h2>
+</div>
+<p>Follow four connected stages, then return to any topic when your project needs it.</p>
+</div>
+<ol class="path-grid">
+<li class="path-step">
+<span class="step-number">01</span>
+<p class="step-action">Understand</p>
+<h3>Learn the architecture</h3>
+<p>See how storage, virtual warehouses and cloud services are separated, and why that changes how you think about cost and concurrency.</p>
+<a class="step-link" href="snowflake_guide_en.html#the-three-layer-architecture">Explore the three layers <span aria-hidden="true">→</span></a>
+</li>
+<li class="path-step">
+<span class="step-number">02</span>
+<p class="step-action">Set up</p>
+<h3>Build a safe lab</h3>
+<p>Create a practice database, an auto-suspending warehouse and a small retail dataset so every example can be run and rerun safely.</p>
+<a class="step-link" href="snowflake_guide_en.html#part-ii-set-up-a-safe-learning-environment">Set up the lab <span aria-hidden="true">→</span></a>
+</li>
+<li class="path-step">
+<span class="step-number">03</span>
+<p class="step-action">Analyze</p>
+<h3>Answer questions in SQL</h3>
+<p>Profile data quality, build business metrics and time series, use window functions, CTEs and views, and flatten semi-structured JSON.</p>
+<a class="step-link" href="snowflake_guide_en.html#part-iii-what-snowflake-can-do-for-data-analytics">Start analyzing <span aria-hidden="true">→</span></a>
+</li>
+<li class="path-step">
+<span class="step-number">04</span>
+<p class="step-action">Govern</p>
+<h3>Control performance and cost</h3>
+<p>Tune queries with pruning and caching, size warehouses for the bottleneck, apply roles and masking policies, and keep spending visible.</p>
+<a class="step-link" href="snowflake_guide_en.html#part-iv-performance-security-and-cost">Performance, security, cost <span aria-hidden="true">→</span></a>
+</li>
+</ol>
+</section>
+<section aria-labelledby="guides-title" class="section guide-section" id="guides">
+<div class="shell">
+<div class="section-intro">
+<div>
+<p class="section-kicker">The guide</p>
+<h2 id="guides-title">One complete guide, from first query to analytics product.</h2>
+</div>
+<p>One practical sequence with runnable SQL, ending in a capstone that turns a business question into a small, validated analytics product.</p>
+</div>
+<div class="guide-grid">
+<article class="guide-card guide-card-en">
+<div class="guide-topline">
+<span aria-hidden="true" class="guide-language">SQL</span>
+<div class="guide-meta">
+<span>Complete guide</span>
+<span>Self-paced</span>
+</div>
+</div>
+<p class="guide-overline">Complete guide</p>
+<h3>Snowflake for Beginners and Data Analytics</h3>
+<p class="guide-description">A practical, end-to-end guide from first warehouse to analytical workflows, with a quick SQL reference, a glossary and a best-practice checklist.</p>
+<ul aria-label="Guide topics" class="topic-list">
+<li>Architecture</li>
+<li>Safe lab setup</li>
+<li>Window functions</li>
+<li>JSON &amp; FLATTEN</li>
+<li>Time Travel</li>
+<li>Data sharing</li>
+<li>Cost controls</li>
+</ul>
+<a class="guide-link" href="snowflake_guide_en.html">Open the guide <span aria-hidden="true">→</span></a>
+</article>
+</div>
+</div>
+</section>
+<section aria-labelledby="tracks-title" class="section shell" id="choose-a-track">
+<div class="section-intro">
+<div>
+<p class="section-kicker">Choose a path</p>
+<h2 id="tracks-title">Start with the route that fits your work.</h2>
+</div>
+<p>You do not need to read every section in order. Choose a route, solve the task in front of you, then return for more depth.</p>
+</div>
+<div class="track-grid">
+<article class="track-card">
+<span class="track-label">Beginner</span>
+<h3>Understand Snowflake and run your first queries</h3>
+<p>Learn what Snowflake is, how its objects are organized, and set up a lab you can safely experiment in.</p>
+<ol class="track-route">
+<li><a href="snowflake_guide_en.html#what-snowflake-is">What Snowflake is</a></li><li><a href="snowflake_guide_en.html#object-hierarchy-and-session-context">Objects and context</a></li><li><a href="snowflake_guide_en.html#create-the-lab-database-and-warehouse">Create the lab</a></li>
+</ol>
+</article>
+<article class="track-card">
+<span class="track-label">Analyst</span>
+<h3>Turn tables into answers</h3>
+<p>Check data quality, use window functions for detail plus context, and work with JSON alongside relational data.</p>
+<ol class="track-route">
+<li><a href="snowflake_guide_en.html#exploratory-data-analysis-and-data-quality">Data quality</a></li><li><a href="snowflake_guide_en.html#window-functions-detail-plus-context">Window functions</a></li><li><a href="snowflake_guide_en.html#semi-structured-data-json-variant-and-flatten">JSON and FLATTEN</a></li>
+</ol>
+</article>
+<article class="track-card">
+<span class="track-label">Platform owner</span>
+<h3>Keep it fast, safe and affordable</h3>
+<p>Apply role-based access, set cost controls and follow a checklist that catches common mistakes.</p>
+<ol class="track-route">
+<li><a href="snowflake_guide_en.html#security-fundamentals">Security</a></li><li><a href="snowflake_guide_en.html#cost-model-and-controls">Cost controls</a></li><li><a href="snowflake_guide_en.html#best-practice-checklist">Best-practice checklist</a></li>
+</ol>
+</article>
+</div>
+</section>
+<section aria-labelledby="concepts-title" class="section shell concepts-wrap" id="concepts">
+<div class="concepts-panel">
+<div class="concepts-header">
+<div>
+<p class="section-kicker section-kicker-light">Key concepts</p>
+<h2 id="concepts-title">Four layers between a question and an answer.</h2>
+</div>
+<p>Each layer has a distinct job. Knowing where work happens makes queries easier to tune, secure and pay for.</p>
+</div>
+<ol aria-label="How a Snowflake query is served" class="concept-flow">
+<li>
+<span class="concept-number">01</span>
+<strong>Storage</strong>
+<small>Compressed, columnar tables</small>
+</li>
+<li>
+<span class="concept-number">02</span>
+<strong>Warehouse</strong>
+<small>Compute that runs the query</small>
+</li>
+<li>
+<span class="concept-number">03</span>
+<strong>Services</strong>
+<small>Optimizer, metadata, security</small>
+</li>
+<li>
+<span class="concept-number">04</span>
+<strong>Results</strong>
+<small>Snowsight, BI tools, Python</small>
+</li>
+</ol>
+<div class="concept-grid">
+<article class="concept-card">
+<span aria-hidden="true" class="concept-symbol">S|C</span>
+<h3>Storage and compute are separate</h3>
+<p>Data is stored once, while any number of virtual warehouses can query it independently, so heavy jobs need not slow everyone else down.</p>
+</article>
+<article class="concept-card">
+<span aria-hidden="true" class="concept-symbol">XS</span>
+<h3>Pay for what runs</h3>
+<p>Warehouses can suspend when idle and resume on demand. Sizing for the real bottleneck matters more than choosing the biggest size.</p>
+</article>
+<article class="concept-card">
+<span aria-hidden="true" class="concept-symbol">⟲</span>
+<h3>Time Travel</h3>
+<p>Query or restore data as it was earlier, within a retention window, which turns many mistakes into recoverable ones.</p>
+</article>
+<article class="concept-card">
+<span aria-hidden="true" class="concept-symbol">⧉</span>
+<h3>Zero-copy cloning</h3>
+<p>Clone a table, schema or database for testing without duplicating storage until the copy starts to change.</p>
+</article>
+</div>
+</div>
+</section>
+</main>
+<footer class="site-footer shell">
+<div>
+<a aria-label="The V Lab Snowflake Learning Hub home" class="footer-brand" href="index.html">
+<span aria-hidden="true" class="brand-mark brand-mark-small">V</span>
+<span>The V Lab</span>
+</a>
+<p>Practical learning for data analytics in the cloud.</p>
+</div>
+<nav aria-label="Footer navigation" class="footer-links">
+<a href="snowflake_guide_en.html">Guide</a>
+<a href="https://vthelab.com/learn.html">All guides on vthelab.com</a>
+<a href="https://github.com/The-V-Lab/SNOWFLAKE_Skills">GitHub repository</a>
+</nav>
+</footer>
+</body>
+</html>
